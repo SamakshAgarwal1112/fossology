@@ -14,6 +14,8 @@ namespace Fossology\UI\Api\Test\Controllers;
 
 require_once dirname(__DIR__, 4) . '/lib/php/Plugin/FO_Plugin.php';
 
+use Fossology\Lib\Auth\Auth;
+use Fossology\UI\Api\Exceptions\HttpBadRequestException;
 use Fossology\UI\Api\Exceptions\HttpNotFoundException;
 use Mockery as M;
 use Fossology\UI\Api\Controllers\UserController;
@@ -72,6 +74,7 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
       'helper.restHelper'))->andReturn($this->restHelper);
     $this->userController = new UserController($container);
     $this->assertCountBefore = \Hamcrest\MatcherAssert::getCount();
+    $_SESSION[Auth::USER_LEVEL] = Auth::PERM_ADMIN;
   }
 
   /**
@@ -83,6 +86,7 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
     $this->addToAssertionCount(
       \Hamcrest\MatcherAssert::getCount() - $this->assertCountBefore);
     M::close();
+    unset($_SESSION[Auth::USER_LEVEL]);
   }
 
   /**
@@ -124,24 +128,46 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::getUsers() for specific user id
+   * -# Test UserController::getUsers() for specific user id for version 1
    * -# Check if response contains only one user info
    */
-  public function testGetSpecificUser()
+  public function testGetSpecificUserV1()
+  {
+    $this->testGetSpecificUser(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::getUsers() for specific user id for version 2
+   * -# Check if response contains only one user info
+   */
+  public function testGetSpecificUserV2()
+  {
+    $this->testGetSpecificUser();
+  }
+  /**
+   * @param $version to test
+   * @return void
+   */
+  private function testGetSpecificUser($version = ApiVersion::V2)
   {
     $userId = 2;
     $userName = 'fossy';
     $userArray = ['user_pk' => $userId];
     $user = $this->getUsers([$userId]);
+    if ($version == ApiVersion::V2) {
+      $userArray = ['user_pk' => $userId];
+      $this->restHelper->getUserDao()->shouldReceive('getUserByName')
+        ->withArgs([$userId])->andReturn($userArray);
+    }
     $request = M::mock(Request::class);
     $this->restHelper->getUserDao()->shouldReceive('getUserByName')
       ->withArgs([$userName])->andReturn($userArray);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->dbHelper->shouldReceive('doesIdExist')
       ->withArgs(["users", "user_pk", $userId])->andReturn(true);
     $this->dbHelper->shouldReceive('getUsers')->withArgs([$userId])
       ->andReturn($user);
-    $expectedResponse = (new ResponseHelper())->withJson($user[0]->getArray(), 200);
+    $expectedResponse = (new ResponseHelper())->withJson($user[0]->getArray($version), 200);
     $actualResponse = $this->userController->getUsers($request, new ResponseHelper(),
       ['pathParam' => $userId]);
     $this->assertEquals($expectedResponse->getStatusCode(),
@@ -152,14 +178,36 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::getUsers() for invalid user id
+   * -# Test UserController::getUsers() for invalid user id for version 1
    * -# Check if response status is 404
    */
-  public function testGetSpecificUserNotFound()
+  public function testGetSpecificUserNotFoundV1()
+  {
+    $this->testGetSpecificUserNotFound(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::getUsers() for invalid user id for version 2
+   * -# Check if response status is 404
+   */
+  public function testGetSpecificUserNotFoundV2()
+  {
+    $this->testGetSpecificUserNotFound();
+  }
+  /**
+   * @param $version to test
+   * @return void
+   */
+  private function testGetSpecificUserNotFound($version = ApiVersion::V2)
   {
     $userId = 6;
     $request = M::mock(Request::class);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    if ($version == ApiVersion::V2) {
+      $userArray = ['user_pk' => $userId];
+      $this->restHelper->getUserDao()->shouldReceive('getUserByName')
+        ->withArgs([$userId])->andReturn($userArray);
+    }
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->dbHelper->shouldReceive('doesIdExist')
       ->withArgs(["users", "user_pk", $userId])->andReturn(false);
     $this->expectException(HttpNotFoundException::class);
@@ -170,20 +218,43 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::getUsers() for all users
+   * -# Test UserController::getUsers() for all users for version 1
    * -# Check if the response is list of user info
    */
-  public function testGetAllUsers()
+  public function testGetAllUsersV1()
   {
+    $this->testGetAllUsers(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::getUsers() for all users for version 2
+   * -# Check if the response is list of user info
+   */
+  public function testGetAllUsersV2()
+  {
+    $this->testGetAllUsers();
+  }
+  /**
+   * @param $version to test
+   * @return void
+   */
+  private function testGetAllUsers($version = ApiVersion::V2)
+  {
+    $userId = 2;
     $users = $this->getUsers([2, 3, 4]);
+    if ($version == ApiVersion::V2) {
+      $userArray = ['user_pk' => $userId];
+      $this->restHelper->getUserDao()->shouldReceive('getUserByName')
+        ->withArgs([$userId])->andReturn($userArray);
+    }
     $request = M::mock(Request::class);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->dbHelper->shouldReceive('getUsers')->withArgs([null])
       ->andReturn($users);
 
     $allUsers = array();
     foreach ($users as $user) {
-      $allUsers[] = $user->getArray();
+      $allUsers[] = $user->getArray($version);
     }
 
     $expectedResponse = (new ResponseHelper())->withJson($allUsers, 200);
@@ -196,18 +267,34 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::deleteUser() for valid delete request
+   * -# Test UserController::deleteUser() for valid delete request for version 1
    * -# Check if response status is 202
    */
-  public function testDeleteUser()
+  public function testDeleteUserV1()
+  {
+    $this->testDeleteUser(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::deleteUser() for valid delete request for version 2
+   * -# Check if response status is 202
+   */
+  public function testDeleteUserV2()
+  {
+    $this->testDeleteUser();
+  }
+  /**
+   * @param $version to test
+   * @return void
+   */
+  private function testDeleteUser($version = ApiVersion::V2)
   {
     $userId = 4;
-    $userName = 'fossy';
     $userArray = ['user_pk' => $userId];
     $request = M::mock(Request::class);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->restHelper->getUserDao()->shouldReceive('getUserByName')
-      ->withArgs([$userName])->andReturn($userArray);
+      ->withArgs([$userId])->andReturn($userArray);
     $this->dbHelper->shouldReceive('doesIdExist')
       ->withArgs(["users", "user_pk", $userId])->andReturn(true);
     $this->dbHelper->shouldReceive('deleteUser')->withArgs([$userId]);
@@ -215,7 +302,7 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
     $expectedResponse = (new ResponseHelper())->withJson($info->getArray(),
       $info->getCode());
     $actualResponse = $this->userController->deleteUser($request, new ResponseHelper(),
-    ['pathParam' => $userId]);
+      ['pathParam' => $userId]);
     $this->assertEquals($expectedResponse->getStatusCode(),
       $actualResponse->getStatusCode());
     $this->assertEquals($this->getResponseJson($expectedResponse),
@@ -224,18 +311,34 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::deleteUser() for invalid user id
+   * -# Test UserController::deleteUser() for invalid user id for version 1
    * -# Check if response status is 404
    */
-  public function testDeleteUserDoesNotExists()
+  public function testDeleteUserDoesNotExistsV1()
+  {
+    $this->testDeleteUserDoesNotExists(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::deleteUser() for invalid user id for version 2
+   * -# Check if response status is 404
+   */
+  public function testDeleteUserDoesNotExistsV2()
+  {
+    $this->testDeleteUserDoesNotExists();
+  }
+  /**
+   * @param $version
+   * @return void
+   */
+  private function testDeleteUserDoesNotExists($version = ApiVersion::V2)
   {
     $userId = 8;
-    $userName = 'fossy';
     $userArray = ['user_pk' => $userId];
     $request = M::mock(Request::class);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->restHelper->getUserDao()->shouldReceive('getUserByName')
-      ->withArgs([$userName])->andReturn($userArray);
+      ->withArgs([$userId])->andReturn($userArray);
     $this->dbHelper->shouldReceive('doesIdExist')
       ->withArgs(["users", "user_pk", $userId])->andReturn(false);
     $this->expectException(HttpNotFoundException::class);
@@ -246,32 +349,87 @@ class UserControllerTest extends \PHPUnit\Framework\TestCase
 
   /**
    * @test
-   * -# Test UserController::getCurrentUser()
+   * -# Test UserController::getCurrentUser() for version 1
    * -# Check if response contains current user's info
    */
-  public function testGetCurrentUser()
+  public function testGetCurrentUserV1()
+  {
+    $this->testGetCurrentUser(ApiVersion::V1);
+  }
+  /**
+   * @test
+   * -# Test UserController::getCurrentUser() for version 2
+   * -# Check if response contains current user's info
+   */
+  public function testGetCurrentUserV2()
+  {
+    $this->testGetCurrentUser();
+  }
+  /**
+   * @param $version to test
+   * @return void
+   */
+  private function testGetCurrentUser($version = ApiVersion::V2)
   {
     $userId = 2;
     $user = $this->getUsers([$userId]);
     $request = M::mock(Request::class);
-    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getAttribute')->andReturn($version);
     $this->restHelper->shouldReceive('getUserId')->andReturn($userId);
     $this->dbHelper->shouldReceive('getUsers')->withArgs([$userId])
       ->andReturn($user);
     $this->userDao->shouldReceive('getUserAndDefaultGroupByUserName')->withArgs([$user[0]->getArray()["name"]])
       ->andReturn(["group_name" => "fossy"]);
 
-    $expectedUser = $user[0]->getArray();
-    $expectedUser["default_group"] = "fossy";
-
+    $expectedUser = $user[0]->getArray($version);
+    if ($version == ApiVersion::V1) {
+      $expectedUser["default_group"] = "fossy";
+    }
     $expectedResponse = (new ResponseHelper())->withJson($expectedUser, 200);
 
     $actualResponse = $this->userController->getCurrentUser($request,
       new ResponseHelper(), []);
-
     $this->assertEquals($expectedResponse->getStatusCode(),
       $actualResponse->getStatusCode());
     $this->assertEquals($this->getResponseJson($expectedResponse),
       $this->getResponseJson($actualResponse));
+  }
+
+  /**
+   * @test
+   * -# Test UserController::addUser() with empty request body
+   * -# Check if HttpBadRequestException is thrown
+   */
+  public function testAddUserEmptyBody()
+  {
+    $request = M::mock(Request::class);
+    $request->shouldReceive('getHeaderLine')
+      ->withArgs(['Content-Type'])->andReturn('');
+    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getParsedBody')->andReturn(null);
+
+    $this->expectException(HttpBadRequestException::class);
+    $this->expectExceptionMessage("Request body is empty or malformed.");
+
+    $this->userController->addUser($request, new ResponseHelper(), []);
+  }
+
+  /**
+   * @test
+   * -# Test UserController::addUser() with missing username
+   * -# Check if HttpBadRequestException is thrown
+   */
+  public function testAddUserMissingName()
+  {
+    $request = M::mock(Request::class);
+    $request->shouldReceive('getHeaderLine')
+      ->withArgs(['Content-Type'])->andReturn('');
+    $request->shouldReceive('getAttribute')->andReturn(ApiVersion::V1);
+    $request->shouldReceive('getParsedBody')->andReturn(['email' => 'test@test.com']);
+
+    $this->expectException(HttpBadRequestException::class);
+    $this->expectExceptionMessage("Username must be specified.");
+
+    $this->userController->addUser($request, new ResponseHelper(), []);
   }
 }

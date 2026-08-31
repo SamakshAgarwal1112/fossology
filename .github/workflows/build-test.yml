@@ -7,6 +7,9 @@ concurrency:
   group: build-${{ github.head_ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [master]
@@ -40,15 +43,6 @@ jobs:
       matrix:
         config:
           - {
-              name: "Ubuntu 22.04 GCC 9",
-              os: ubuntu-22.04,
-              build_type: "Debug",
-              cc: "gcc-9",
-              cxx: "g++-9",
-              php: "8.1",
-              experimental: false,
-            }
-          - {
               name: "Ubuntu 22.04 GCC 11",
               os: ubuntu-22.04,
               build_type: "Debug",
@@ -73,7 +67,7 @@ jobs:
           sudo apt update
           sudo apt install -y git
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 50
 
@@ -99,10 +93,6 @@ jobs:
           extensions: gettext, mbstring, gd, json, xml, zip, pgsql, curl, uuid, posix, sqlite3
         env:
           fail-fast: true
-
-      - name: Install additional Dependencies
-        if: ${{ matrix.config.cc == 'gcc-8' }}
-        run: sudo apt install -y gcc-8 g++-8
 
       - name: Configure and Generate CMake Project
         run: |
@@ -155,7 +145,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 50
       - name: Install Dependencies

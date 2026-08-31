@@ -98,7 +98,7 @@ function createTableForJob(job) {
   var uploadLink = "";
   if (job.upload !== null && job.upload.uploadItem != -1) {
     uploadLink = '<a title="{{ "Click to browse"|trans }}" ' +
-    'href="?mod=browse&upload=' + job.upload.uploadId + '&item=' +
+    'href="?mod=fileBrowse&upload=' + job.upload.uploadId + '&item=' +
     job.upload.uploadItem + '">' + job.upload.uploadName + '</a>';
   } else if (job.upload !== null && job.job.jobName == "Delete") {
     uploadLink = '<span style="color:black">' + job.upload.uploadName +
@@ -185,7 +185,8 @@ function fillTableWithJobInfo(tableTemplate, job) {
     } else {
       jqETA = "{{ "Scanned"|trans }}";
     }
-    if (jqET.indexOf("Fail") !== -1 || jqET.indexOf("kill") !== -1) {
+    var jqETLower = jqET.toLowerCase();
+    if (jqETLower.indexOf("fail") !== -1 || jqETLower.indexOf("kill") !== -1) {
       trClass = "jobFailed";
     }
 
@@ -201,7 +202,7 @@ function fillTableWithJobInfo(tableTemplate, job) {
   });
 }
 
-function getTableBody() {
+function getTableBody(callback) {
   var post_data = {
     "upload"  :{{ uploadId }},
     "allusers":{{ allusersval }},
@@ -215,7 +216,12 @@ function getTableBody() {
     success: function (data) {
       createShowJobsTable(data);
     },
-    error: function(responseobject) { }
+    error: function(responseobject) { },
+    complete: function () {
+      if (typeof callback === "function") {
+        callback();
+      }
+    }
   });
 }
 

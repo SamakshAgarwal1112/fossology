@@ -219,7 +219,7 @@ class CopyrightDao
     }
 
     $sql = "SELECT DISTINCT ON(copyright_pk, UT.uploadtree_pk)
-copyright_pk, UT.uploadtree_pk as uploadtree_pk,
+copyright_pk, UT.uploadtree_pk as uploadtree_pk, UT.upload_fk, UT.lft, UT.rgt,
 (CASE WHEN (CE.content IS NULL OR CE.content = '') THEN C.content ELSE CE.content END) AS content,
 (CASE WHEN (CE.hash IS NULL OR CE.hash = '') THEN C.hash ELSE CE.hash END) AS hash,
 C.agent_fk as agent_fk
@@ -458,7 +458,7 @@ ORDER BY copyright_pk, UT.uploadtree_pk, content DESC";
 
     if (!empty($hash)) {
       $params[] = $hash;
-      $withHash = " (cp.hash = $4 OR ce.hash = $4) AND ";
+      $withHash = " (CASE WHEN (ce.hash IS NULL OR ce.hash = '') THEN cp.hash ELSE ce.hash END) = $4 AND ";
       $stmt .= ".hash";
     }
     // get latest agent id for agent
@@ -498,9 +498,7 @@ WHERE $withHash ( ut.lft BETWEEN $1 AND $2 ) $agentFilter AND ut.upload_fk = $3"
       $paramEvent[] = $row['upload_fk'];
       $paramEvent[] = $row[$cpTablePk];
       $paramEvent[] = $row['uploadtree_pk'];
-      $sqlExists = "SELECT exists(SELECT 1 FROM $cpTableEvent WHERE $cpTableEventFk = $1 AND upload_fk = $2 AND uploadtree_fk = $3)::int";
-      $rowExists = $this->dbManager->getSingleRow($sqlExists, array($row[$cpTablePk], $row['upload_fk'], $row['uploadtree_pk']), $stmt.'Exists');
-      $eventExists = $rowExists['exists'];
+      $eventExists = !empty($row[$cpTableEvent . '_pk']);
       if ($action == "delete") {
         $paramEvent[] = $scope;
         if ($eventExists) {
@@ -511,10 +509,16 @@ WHERE $withHash ( ut.lft BETWEEN $1 AND $2 ) $agentFilter AND ut.upload_fk = $3"
           $sqlEvent = "INSERT INTO $cpTableEvent (upload_fk, $cpTableEventFk, uploadtree_fk, is_enabled, scope) VALUES($1, $2, $3, 'f', $4)";
           $statement = "$stmt.delete";
         }
+      } else if ($action == "revertToOriginal") {
+        if (!$eventExists) {
+          continue;
+        }
+        $sqlEvent = "DELETE FROM $cpTableEvent WHERE upload_fk = $1 AND $cpTableEventFk = $2 AND uploadtree_fk = $3 AND is_enabled = true";
+        $statement = "$stmt.revertToOriginal";
       } else if ($action == "rollback" && $eventExists) {
-          $sqlEvent = "UPDATE $cpTableEvent SET scope = 1, is_enabled = true
+        $sqlEvent = "UPDATE $cpTableEvent SET scope = 1, is_enabled = true
           WHERE upload_fk = $1 AND $cpTableEventFk = $2 AND uploadtree_fk = $3";
-          $statement = "$stmt.rollback.up";
+        $statement = "$stmt.rollback.up";
       } else {
         $paramEvent[] = StringOperation::replaceUnicodeControlChar($content);
 

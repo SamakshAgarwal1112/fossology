@@ -20,6 +20,18 @@ use Monolog\Logger;
  */
 class CompatibilityDao
 {
+  /**
+   * @var string RULE_SELECT
+   *      Base query to fetch the rules along with the license short names
+   */
+  const RULE_SELECT = "SELECT lr_pk, first_rf_fk, second_rf_fk,
+      lrf.rf_shortname AS first_rf_shortname,
+      lrs.rf_shortname AS second_rf_shortname, first_type, second_type,
+      comment, compatibility
+    FROM license_rules
+      LEFT JOIN license_ref lrf ON lrf.rf_pk = first_rf_fk
+      LEFT JOIN license_ref lrs ON lrs.rf_pk = second_rf_fk";
+
   /** @var DbManager */
   private $dbManager;
   /** @var Logger */
@@ -94,15 +106,88 @@ class CompatibilityDao
   }
 
   /**
-   * @brief Get all the existing rules present in the database
-   * @return array
+   * @brief Get all the existing license compatibility rules from the database
+   * @param int $limit The maximum number of rules to retrieve (default is 10)
+   * @param int $offset The number of rules to skip (default is 0)
+   * @param string $searchTerm The search term to filter rules by (default is an empty string)
+   * @return array An array of license compatibility rules
    */
-  public function getAllRules()
+  public function getAllRules($limit = 10, $offset = 0, $searchTerm = '')
   {
-    $sql = "SELECT lr_pk, first_rf_fk, second_rf_fk, first_type, second_type,
-      comment, compatibility
-      FROM license_rules ORDER BY lr_pk;";
-      return $this->dbManager->getRows($sql);
+    $stmt = __METHOD__;
+    $params = [];
+    $sql = self::RULE_SELECT;
+    if (!empty($searchTerm)) {
+      $params[] = $searchTerm;
+      $sql .= ' WHERE comment ILIKE $' . count($params);
+      $stmt .= '.search';
+    }
+    $params[] = $limit;
+    $sql .= ' ORDER BY lr_pk LIMIT $' . count($params);
+    $params[] = $offset;
+    $sql .= ' OFFSET $' . count($params) . ';';
+    return $this->dbManager->getRows($sql, $params, $stmt);
+  }
+
+  /**
+   * @brief Get a single license compatibility rule from the database
+   * @param int $rulePk ID of the rule to fetch
+   * @return array|null The rule if it exists, null otherwise
+   */
+  public function getRuleById($rulePk)
+  {
+    $row = $this->dbManager->getSingleRow(self::RULE_SELECT .
+      ' WHERE lr_pk = $1;', [$rulePk], __METHOD__);
+    return empty($row) ? null : $row;
+  }
+
+  /**
+   * @brief Get the total count of license compatibility rules
+   * @param string $searchTerm The search term to filter rules by (default is an empty string)
+   * @return int The total count of rules that match the search term
+   */
+  public function getTotalRulesCount($searchTerm = '')
+  {
+    $stmt = __METHOD__;
+    $params = [];
+    $query = "SELECT COUNT(*) as count FROM license_rules";
+    if (!empty($searchTerm)) {
+      $params[] = $searchTerm;
+      $query .= ' WHERE comment ILIKE $' . count($params);
+      $stmt .= '.search';
+    }
+    $count = $this->dbManager->getSingleRow($query, $params, $stmt);
+    return $count ? intval($count['count']) : 0;
+  }
+
+  /**
+   * @brief Insert a new empty rule in the database
+   * @return int
+   */
+  public function insertEmptyRule()
+  {
+    if (!Auth::isAdmin()) {
+      return -1;
+    }
+    $params = [
+      'first_rf_fk' => null,
+      'second_rf_fk' => null,
+      'first_type' => null,
+      'second_type' => null,
+      'comment' => '',
+      'compatibility' => false
+    ];
+
+    $statement = __METHOD__ . ".insertEmptyLicCompatibilityRule";
+    $returning = "lr_pk";
+    $returnVal = -1;
+
+    try {
+      $returnVal = $this->dbManager->insertTableRow("license_rules", $params, $statement, $returning);
+    } catch (\Exception $_) {
+      $returnVal = -2;
+    }
+    return $returnVal;
   }
 
   /**
@@ -194,7 +279,9 @@ class CompatibilityDao
         $statement .= ".comment";
       }
       if (array_key_exists("result", $rule)) {
-        $params[] = $rule["result"];
+        // Booleans are not casted by the driver, unlike on insert.
+        $params[] = is_bool($rule["result"]) ?
+          $this->dbManager->booleanToDb($rule["result"]) : $rule["result"];
         $updateStatement[] = "compatibility = $" . count($params);
         $statement .= ".compatibility";
       }

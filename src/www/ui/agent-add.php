@@ -64,17 +64,19 @@ class AgentAdder extends DefaultPlugin
     $vars['uploadId'] = $uploadId;
 
     $parmAgentList = MenuHook::getAgentPluginNames("ParmAgents");
-    $out = '<ol>';
     $parmAgentFoots = '';
+    $paramAgentIncludes = '';
+    $out = '';
     foreach ($parmAgentList as $parmAgent) {
       $agent = plugin_find($parmAgent);
-      $out .= "<br/><b>".$agent->AgentName.":</b><br/>";
+      $out .= "<br/><b>".ucfirst($agent->AgentName).":</b><br/>";
       $out .= $agent->renderContent($vars);
       $parmAgentFoots .= $agent->renderFoot($vars);
+      $paramAgentIncludes .= $agent->getScriptIncludes($vars);
     }
-    $out .= '</ol>';
     $vars['out'] = $out;
     $vars['outFoot'] = '<script language="javascript"> '.$parmAgentFoots.'</script>';
+    $vars['paramIncludes'] = $paramAgentIncludes;
 
     return $this->render('agent_adder.html.twig', $this->mergeWithDefault($vars));
   }
@@ -112,17 +114,53 @@ class AgentAdder extends DefaultPlugin
 
     $jobId = JobAddJob(Auth::getUserId(), Auth::getGroupId(), $upload->getFilename(), $uploadId);
     $errorMsg = '';
+
+    // Plain agents must be queued before the ParmAgents loop below: decider
+    // resolves its scanner dependencies by checking if they are queued yet.
+    foreach ($agents as $agentName => &$plainAgent) {
+      if (in_array($agentName, $parmAgentList)) {
+        continue;
+      }
+      if (!empty($mimetypeIgnore)) {
+        $rv = $plainAgent->AgentAdd($jobId, $uploadId, $errorMsg,
+            array("agent_mimetype"), $mimetypeIgnore, $request);
+      } else {
+        $rv = $plainAgent->AgentAdd($jobId, $uploadId, $errorMsg, array(), null,
+            $request);
+      }
+      if ($rv == -1) {
+        return $errorMsg;
+      }
+    }
+    unset($plainAgent);
+
+    MenuHook::rearrangeParmAgentsBeforeDecider($parmAgentList);
     foreach ($parmAgentList as $parmAgent) {
       $agent = plugin_find($parmAgent);
       $agent->scheduleAgent($jobId, $uploadId, $errorMsg, $request);
     }
 
-    foreach ($agents as &$agent) {
+    $deciderRules = $request->get('deciderRules', []);
+    if (!is_array($deciderRules)) {
+      $deciderRules = [];
+    }
+    if (count($deciderRules) == 1 && in_array('kotobaAgent', $deciderRules)) {
+      if (isset($agents['agent_decider'])) {
+        unset($agents['agent_decider']);
+      }
+    }
+
+    // ParmAgent selections not covered by scheduleAgent() above (e.g. picked
+    // directly from the generic agent list rather than a dedicated widget).
+    foreach ($agents as $agentName => &$parmAgentSelection) {
+      if (!in_array($agentName, $parmAgentList)) {
+        continue;
+      }
       if (!empty($mimetypeIgnore)) {
-        $rv = $agent->AgentAdd($jobId, $uploadId, $errorMsg,
+        $rv = $parmAgentSelection->AgentAdd($jobId, $uploadId, $errorMsg,
             array("agent_mimetype"), $mimetypeIgnore, $request);
       } else {
-        $rv = $agent->AgentAdd($jobId, $uploadId, $errorMsg, array(), null,
+        $rv = $parmAgentSelection->AgentAdd($jobId, $uploadId, $errorMsg, array(), null,
             $request);
       }
       if ($rv == -1) {

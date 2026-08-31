@@ -11,10 +11,15 @@
   <div class="modal-dialog modal-dialog-centered modal-lg">
     <div class="modal-content">
 
+      <!-- Loader -->
+      <div id="loader" class="dataTables_processing" style="display:none;">
+        Loading...
+      </div>
+
       <!-- Modal Header -->
       <div class="modal-header">
         <h4 class="modal-title">Edit Decisions</h4>
-        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+        <button type="button" class="close" onclick="closeUserModal();" data-dismiss="modal" aria-label="Close">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
@@ -42,9 +47,9 @@
               </select>
             </div>
             <div class="col-xs-1 my-auto px-0 text-center">
-              <input type="button" value="&gt;" class="btn btn-default btn-sm" onclick="moveLicense(this.form.licenseLeft, this.form.licenseRight);" />
+              <input type="button" value="&gt;" class="btn btn-light btn-sm" onclick="moveLicense(this.form.licenseLeft, this.form.licenseRight);" />
               <br><br>
-              <input type="button" value="&lt;" class="btn btn-default btn-sm" onclick="moveLicense(this.form.licenseRight, this.form.licenseLeft);" />
+              <input type="button" value="&lt;" class="btn btn-light btn-sm" onclick="moveLicense(this.form.licenseRight, this.form.licenseLeft);" />
             </div>
             <div class="col">
               <label for="licenseRight">{{ 'Selected licenses'|trans }}:</label>
@@ -55,14 +60,14 @@
           </div>
           <div class="row justify-content-md-center pt-3">
             <div class="col text-center">
-              <button type="button" class="btn btn-default"
+              <button type="button" class="btn btn-light"
                   onclick="performPostRequest(false);">
                 {{ 'Add selected licenses'|trans }}
               </button>
             </div>
             <div class="col-xs-1 my-auto px-0 text-center"></div>
             <div class="col text-center">
-              <button type="button" class="btn btn-default"
+              <button type="button" class="btn btn-light"
                   onclick="performPostRequest(true);">
                 {{ 'Remove selected licenses'|trans }}
               </button>

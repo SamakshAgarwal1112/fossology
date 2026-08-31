@@ -28,6 +28,24 @@ define("CONFIG_TYPE_BOOL", 6);
 
 
 /**
+ * Resolve simple $VAR and ${VAR} placeholders against already-known values.
+ *
+ * @param string $value The raw config value.
+ * @param array $scope Previously resolved values.
+ * @return string
+ */
+if (!function_exists('resolve_sysconfig_value')) {
+  function resolve_sysconfig_value($value, array $scope)
+  {
+    return preg_replace_callback('/\$(?:([A-Za-z_][A-Za-z0-9_]*)|\{([A-Za-z_][A-Za-z0-9_]*)\})/', static function ($matches) use ($scope) {
+      $name = !empty($matches[1]) ? $matches[1] : $matches[2];
+      return array_key_exists($name, $scope) ? $scope[$name] : $matches[0];
+    }, $value);
+  }
+}
+
+
+/**
  * \brief Initialize the fossology system after bootstrap().
  *
  * This function also opens a database connection (global PG_CONN).
@@ -87,16 +105,18 @@ function get_pg_conn($sysconfdir, &$SysConf, $exitOnDbFail=true)
   /*************  Parse VERSION *******************/
   $versionFile = "{$sysconfdir}/VERSION";
   $versionConf = parse_ini_file($versionFile, true);
+  $resolvedValues = array();
 
-  /* Add this file contents to $SysConf, then destroy $VersionConf
-   * This file can define its own groups and is eval'd.
+  /* Add this file contents to $SysConf, then destroy $VersionConf.
+   * This file can define its own groups and uses simple placeholder expansion.
    */
   foreach ($versionConf as $groupName => $groupArray) {
     foreach ($groupArray as $var => $assign) {
-      $toeval = "\$$var = \"$assign\";";
-      eval($toeval);
-      $SysConf[$groupName][$var] = ${$var};
-      $GLOBALS[$var] = ${$var};
+      $resolvedValue = resolve_sysconfig_value($assign, $resolvedValues);
+      $resolvedValues[$var] = $resolvedValue;
+      $SysConf[$groupName][$var] = $resolvedValue;
+      ${$var} = $resolvedValue;
+      $GLOBALS[$var] = $resolvedValue;
     }
   }
   unset($versionConf);
@@ -268,7 +288,7 @@ function Populate_sysconfig()
 
   $variable = "OidcJwkAlgInject";
   $oidcPrompt = _('OIDC JWKS Algorithm inject');
-  $oidcDesc = _('Algorithm value to inject for JWKS. Leave empty to not modifiy.' .
+  $oidcDesc = _('Algorithm value to inject for JWKS. Leave empty to not modify.' .
     '<br><a href="https://datatracker.ietf.org/doc/html/rfc7517#section-4.4">Check info</a>.');
   $valueArray[$variable] = array("'$variable'", "null", "'$oidcPrompt'",
     strval(CONFIG_TYPE_TEXT), "'OauthSupport'", "14", "'$oidcDesc'", "null", "null");
@@ -278,6 +298,12 @@ function Populate_sysconfig()
   $oidcDesc = _('e.g. "http://oauth.com/logout.oauth2"<br>URL to redirect user to for logout.');
   $valueArray[$variable] = array("'$variable'", "null", "'$oidcPrompt'",
     strval(CONFIG_TYPE_TEXT), "'OauthSupport'", "15", "'$oidcDesc'", "null", "null");
+
+  $variable = "OidcScope";
+  $prompt = _('OIDC Scope');
+  $desc = _('Scope of OIDC for client_credential grant. Used with LicenseDB.');
+  $valueArray[$variable] = array("'$variable'", "''", "'$prompt'",
+    strval(CONFIG_TYPE_TEXT), "'OauthSupport'", "16", "'$oidcDesc'", "null", "null");
 
   /*  Banner Message */
   $variable = "BannerMsg";
@@ -376,6 +402,40 @@ function Populate_sysconfig()
   $contextDesc = _("Obligations and risk assessment,". "$commonExObligations");
   $valueArray[$variable] = array("'$variable'", "'$contextValue'", "'$contextNamePrompt'",
     strval(CONFIG_TYPE_TEXTAREA), "'ReportText'", "4", "'$contextDesc'", "null", "null");
+
+  $variable         = "EnableOsselotReuse";
+  $prompt           = ("Enable OSSelot Reuse");
+  $desc             = ("When enabled, shows the OSSelot-based reuse option in the Reuser plugin");
+  $valueArray[$variable] = array("'$variable'","true","'$prompt'",
+      strval(CONFIG_TYPE_BOOL),"'ReportText'","5","'$desc'","'check_boolean'","null");
+
+  $variable = "OsselotCuratedUrl";
+  $osselotCuratedPrompt = _('OSSelot Curated API URL');
+  $osselotCuratedValid = "check_url";
+  $osselotCuratedDesc = _('URL for OSSelot curated package information API.');
+  $valueArray[$variable] = array("'$variable'", "'https://www.osselot.org/curated.php'", "'$osselotCuratedPrompt'",
+    strval(CONFIG_TYPE_TEXT), "'OSSelot'", "1", "'$osselotCuratedDesc'", "'$osselotCuratedValid'", "null");
+
+  $variable = "OsselotPackageAnalysisUrl";
+  $osselotPackagePrompt = _('OSSelot Package Analysis Base URL');
+  $osselotPackageValid = "check_url";
+  $osselotPackageDesc = _('Base URL for OSSelot package analysis repository.');
+  $valueArray[$variable] = array("'$variable'", "'https://raw.githubusercontent.com/Open-Source-Compliance/package-analysis/main/analysed-packages'", "'$osselotPackagePrompt'",
+    strval(CONFIG_TYPE_TEXT), "'OSSelot'", "2", "'$osselotPackageDesc'", "'$osselotPackageValid'", "null");
+
+  $variable = "OsselotPrimaryDomain";
+  $osselotPrimaryPrompt = _('OSSelot Primary Domain');
+  $osselotPrimaryValid = "check_domain";
+  $osselotPrimaryDesc = _('Primary domain used in OSSelot package analysis URLs (e.g., raw.githubusercontent.com).');
+  $valueArray[$variable] = array("'$variable'", "'raw.githubusercontent.com'", "'$osselotPrimaryPrompt'",
+    strval(CONFIG_TYPE_TEXT), "'OSSelot'", "3", "'$osselotPrimaryDesc'", "'$osselotPrimaryValid'", "null");
+
+  $variable = "OsselotFallbackDomain";
+  $osselotFallbackPrompt = _('OSSelot Fallback Domain');
+  $osselotFallbackValid = "check_domain";
+  $osselotFallbackDesc = _('Fallback domain used when primary domain fails (e.g., osselot.org).');
+  $valueArray[$variable] = array("'$variable'", "'osselot.org'", "'$osselotFallbackPrompt'",
+    strval(CONFIG_TYPE_TEXT), "'OSSelot'", "4", "'$osselotFallbackDesc'", "'$osselotFallbackValid'", "null");
 
   /*  "Upload from server"-configuration  */
   $variable = "UploadFromServerWhitelist";
@@ -529,9 +589,10 @@ function Populate_sysconfig()
 
   $variable = "LicenseTypes";
   $licenseTypeTitle = _("License Types");
-  $contextValue = "Permissive, Strong Copyleft, Weak Copyleft";
   $licenseTypeDesc = _("add comma (,) separated different license types");
-  $valueArray[$variable] = array("'$variable'", "'$contextValue'", "'$licenseTypeTitle'",
+  $valueArray[$variable] = array("'$variable'",
+    "'Permissive, Strong Copyleft, Weak Copyleft, Network Copyleft, Public Domain, Non-commercial, Source Available, Font, Data, Exception, Unknown'",
+    "'$licenseTypeTitle'",
     strval(CONFIG_TYPE_TEXT), "'LICENSE'", "1", "'$licenseTypeDesc'", "null", "null");
 
   /* SoftwareHeritage agent config */
@@ -580,6 +641,51 @@ function Populate_sysconfig()
   $valueArray[$variable] = array("'$variable'",
     "''", "'$prompt'",
     strval(CONFIG_TYPE_TEXT), "'SSS'", "2", "'$desc'", "null", "null");
+
+  /* LicenseDB config */
+  $variable = "LicenseDBBaseURL";
+  $prompt = _('LicenseDB API base URI');
+  $desc = _('Base URI for API calls e.g. /api/v1');
+  $valueArray[$variable] = array("'$variable'", "'http://localhost:8080/api/v1'",
+    "'$prompt'", strval(CONFIG_TYPE_TEXT), "'LicenseDB'", "1", "'$desc'", "null",
+    "null");
+
+  $variable = "LicenseDBHealth";
+  $prompt = _('Health check');
+  $desc = _('Endpoint to check health of LicenseDB service');
+  $valueArray[$variable] = array("'$variable'", "'/health'", "'$prompt'",
+    strval(CONFIG_TYPE_TEXT), "'LicenseDB'", "2", "'$desc'", "null", "null");
+
+  $variable = "LicenseDBContent";
+  $prompt = _('Export endpoint Licenses');
+  $desc = _('Endpoint to Export licenses in JSON e.g. /licenses/export');
+  $valueArray[$variable] = array("'$variable'", "'/licenses/export'", "'$prompt'",
+    strval(CONFIG_TYPE_TEXT), "'LicenseDB'", "3", "'$desc'", "null", "null");
+
+  $variable = "LicenseDBContentObligations";
+  $prompt = _('Export endpoint Obligations');
+  $desc = _('Endpoint to Export Obligations in JSON e.g. /obligations/export');
+  $valueArray[$variable] = array("'$variable'", "'/obligations/export'", "'$prompt'",
+    strval(CONFIG_TYPE_TEXT), "'LicenseDB'", "4", "'$desc'", "null", "null");
+
+  $variable = "LicenseDBToken";
+  $prompt = _('Auth token For LicenseDB');
+  $desc = _("Token from LicenseDB. Do not set if using OIDC for LicenseDB and FOSSology communication.");
+  $valueArray[$variable] = array("'$variable'", "''", "'$prompt'",
+    strval(CONFIG_TYPE_PASSWORD), "'LicenseDB'", "5", "'$desc'", "null", "null");
+
+  $variable = "ExcludeFolders";
+  $mimeTypeToSkip = _("Exclude Folders from scanning");
+  $mimeTypeDesc = _("Add comma (,) separated folder patterns to exclude from unpacking");
+  $valueArray[$variable] = array("'$variable'", "null", "'$mimeTypeToSkip'",
+    strval(CONFIG_TYPE_TEXT), "'Skip'", "1", "'$mimeTypeDesc'", "null", "null");
+
+  /* kotoba Agent */
+  $variable = "KotobaDelimiters";
+  $prompt = _('Kotoba Agent Delimiters');
+  $desc = _('Comma-separated list of additional delimiter characters for kotoba agent. Space, comma, tab, newline, carriage return, and form feed are always included as delimiters. Leave empty to use only the default delimiters. Example: "#,^,%,*" to add special characters');
+  $valueArray[$variable] = array("'$variable'", "null", "'$prompt'",
+    strval(CONFIG_TYPE_TEXT), "'Kotoba'", "1", "'$desc'", "null", "null");
 
   /* Doing all the rows as a single insert will fail if any row is a dupe.
    So insert each one individually so that new variables get added.
@@ -746,18 +852,19 @@ function is_available($url, $timeout = 2, $tries = 2)
   $proxyStmts = "";
   if (array_key_exists('http_proxy', $SysConf['FOSSOLOGY']) &&
     $SysConf['FOSSOLOGY']['http_proxy']) {
-    $proxyStmts .= "export http_proxy={$SysConf['FOSSOLOGY']['http_proxy']};";
+    $proxyStmts .= "export http_proxy=" . escapeshellarg($SysConf['FOSSOLOGY']['http_proxy']) . ";";
   }
   if (array_key_exists('https_proxy', $SysConf['FOSSOLOGY']) &&
     $SysConf['FOSSOLOGY']['https_proxy']) {
-    $proxyStmts .= "export https_proxy={$SysConf['FOSSOLOGY']['https_proxy']};";
+    $proxyStmts .= "export https_proxy=" . escapeshellarg($SysConf['FOSSOLOGY']['https_proxy']) . ";";
   }
   if (array_key_exists('ftp_proxy', $SysConf['FOSSOLOGY']) &&
     $SysConf['FOSSOLOGY']['ftp_proxy']) {
-    $proxyStmts .= "export ftp_proxy={$SysConf['FOSSOLOGY']['ftp_proxy']};";
+    $proxyStmts .= "export ftp_proxy=" . escapeshellarg($SysConf['FOSSOLOGY']['ftp_proxy']) . ";";
   }
 
-  $commands = "$proxyStmts wget --spider '$url' --tries=$tries --timeout=$timeout";
+  $commands = $proxyStmts . "wget --spider " . escapeshellarg($url) .
+    " --tries=" . (int) $tries . " --timeout=" . (int) $timeout;
   system($commands, $return_var);
   if (0 == $return_var) {
     return 1;
@@ -832,3 +939,4 @@ function get_system_load_average()
 
   return '<button type="button" aria-disabled="true" disabled class="btn '.$class.'">System Load</button>';
 }
+

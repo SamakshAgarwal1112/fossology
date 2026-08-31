@@ -30,12 +30,12 @@ class maintagent extends FO_Plugin {
     "L"=>"Remove orphaned log files from file system.",
     "N"=>"Normalize priority ",
     // "p"=>_("Verify file permissions (report only)."),
-    //  "P"=>_("Verify and fix file permissions."),
+    // "P"=>_("Verify and fix file permissions."),
     "R"=>"Remove uploads with no pfiles.",
     "t"=>"Remove expired personal access tokens.",
     "T"=>"Remove orphaned temp tables.",
     "D"=>"Vacuum Analyze the database.",
-    //       "U"=>_("Process expired uploads (slow)."),
+    // "U"=>_("Process expired uploads (slow)."),
     "Z"=>"Remove orphaned files from the repository (slow).",
     "I"=>"Reindexing of database (This activity may take 5-10 mins. Execute only when system is not in use).",
     "v"=>"verbose (turns on debugging output)",
@@ -105,17 +105,28 @@ class maintagent extends FO_Plugin {
 
 
   /**
+   * \brief Get the timestamp of the last successfully completed maintenance job
+   * \return string|null The 'jq_endtime' value of the latest successful run, or null if none has completed yet
+   */
+  public function getLastMaintenanceRunTime()
+  {
+    $statementName = __METHOD__;
+    $row = $this->dbManager->getSingleRow(
+      "SELECT jq_endtime FROM jobqueue WHERE jq_type = $1 AND jq_end_bits = $2 ORDER BY jq_endtime DESC LIMIT 1",
+      array("maintagent", 1), $statementName);
+    return (is_array($row) && !empty($row['jq_endtime'])) ? $row['jq_endtime'] : null;
+  }
+
+  /**
    * \brief Display the input form
    * \returns string HTML in string
    */
   function DisplayForm()
   {
     $V = "";
-    $statementName = __METHOD__."maintenanceInfo";
-    $row = $this->dbManager->getSingleRow("SELECT jq_endtime FROM jobqueue WHERE jq_type = $1 AND jq_end_bits=$2 ORDER BY jq_endtime DESC LIMIT $2",
-           array("maintagent",1), $statementName);
-    if(!empty($row['jq_endtime'])){
-      $dateLastExecuted = Convert2BrowserTime($row['jq_endtime']);
+    $lastRunTime = $this->getLastMaintenanceRunTime();
+    if ($lastRunTime !== null) {
+      $dateLastExecuted = Convert2BrowserTime($lastRunTime);
       $text = _("Last maintenance job was executed on '$dateLastExecuted'");
       $V.= DisplayMessage($text);
     }

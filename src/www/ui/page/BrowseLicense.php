@@ -92,6 +92,9 @@ class BrowseLicense extends DefaultPlugin
        */
       $treeDao = $container->get('dao.tree');
       $parent = $treeDao->getParentOfItem($itemBounds);
+      if (empty($parent)) {
+        $parent = $Item;
+      }
       $viewLicenseURI = $this->NAME . Traceback_parm_keep(array("show",
         "format", "page", "upload")) . "&item=$parent";
     }
@@ -145,6 +148,7 @@ class BrowseLicense extends DefaultPlugin
     $vars = array_merge($vars, $histVars);
 
     $vars['content'] = js_url();
+    $vars['isAdmin'] = Auth::isAdmin();
 
     return $this->render("browse.html.twig",$this->mergeWithDefault($vars));
   }
@@ -193,7 +197,10 @@ class BrowseLicense extends DefaultPlugin
      * $ChildCount can also be zero if the directory is empty.
      * **************************************/
     if ($childCount == 0) {
-      return new RedirectResponse("?mod=view-license" . Traceback_parm_keep(array("upload", "item")));
+      $itemEntry = $this->uploadDao->getUploadEntry($itemTreeBounds->getItemId(), $this->uploadtree_tablename);
+      if ($itemEntry && !Isdir($itemEntry['ufile_mode'])) {
+        return new RedirectResponse("?mod=view-license" . Traceback_parm_keep(array("upload", "item")));
+      }
     }
 
     $vars['licenseUri'] = Traceback_uri() . "?mod=popup-license&rf=";
@@ -230,6 +237,7 @@ class BrowseLicense extends DefaultPlugin
     $fileCount = $this->uploadDao->countPlainFiles($itemTreeBounds);
     $licenseHistogram = $this->licenseDao->getLicenseHistogram($itemTreeBounds, $agentIds);
     $editedLicensesHist = $this->clearingDao->getClearedLicenseIdAndMultiplicities($itemTreeBounds, $groupId);
+    $mainLicenseIds = $this->clearingDao->getMainLicenseIds($itemTreeBounds->getUploadId(), $groupId);
 
     $agentId = GetParm('agentId', PARM_INTEGER);
     $licListUri = Traceback_uri()."?mod=license_list_files&item=$uploadTreeId";
@@ -242,7 +250,7 @@ class BrowseLicense extends DefaultPlugin
 
     /* Write license histogram to $VLic  */
     list($tableData, $totalScannerLicenseCount, $editedTotalLicenseCount)
-        = $this->createLicenseHistogramJSarray($licenseHistogram, $editedLicensesHist, $licListUri);
+        = $this->createLicenseHistogramJSarray($licenseHistogram, $editedLicensesHist, $licListUri, $mainLicenseIds);
 
     $uniqueLicenseCount = count($tableData);
     $scannerUniqueLicenseCount = count( $licenseHistogram );
@@ -273,7 +281,7 @@ class BrowseLicense extends DefaultPlugin
    * @return array
    * @todo convert to template
    */
-  protected function createLicenseHistogramJSarray($scannerLics, $editedLics, $licListUri)
+  protected function createLicenseHistogramJSarray($scannerLics, $editedLics, $licListUri, $mainLicenseIds)
   {
     $allScannerLicenseNames = array_keys($scannerLics);
     $allEditedLicenseNames = array_keys($editedLics);
@@ -302,7 +310,8 @@ class BrowseLicense extends DefaultPlugin
           urlencode($licenseShortName) . "'>$count</a>": "0";
       $editedLink = ($editedCount > 0) ? $editedCount : "0";
 
-      $tableData[] = array($scannerCountLink, $editedLink, array($licenseShortName,$rfId));
+      $isMain = in_array($rfId, $mainLicenseIds);
+      $tableData[] = array($scannerCountLink, $editedLink, array($licenseShortName,$rfId,$isMain));
     }
 
     return array($tableData, $totalScannerLicenseCount, $editedTotalLicenseCount);

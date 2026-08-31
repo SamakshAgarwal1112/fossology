@@ -32,11 +32,13 @@ use Fossology\UI\Api\Controllers\FolderController;
 use Fossology\UI\Api\Controllers\GroupController;
 use Fossology\UI\Api\Controllers\InfoController;
 use Fossology\UI\Api\Controllers\JobController;
+use Fossology\UI\Api\Controllers\LicenseCompatibilityRuleController;
 use Fossology\UI\Api\Controllers\LicenseController;
 use Fossology\UI\Api\Controllers\MaintenanceController;
 use Fossology\UI\Api\Controllers\ObligationController;
 use Fossology\UI\Api\Controllers\OneShotController;
 use Fossology\UI\Api\Controllers\OverviewController;
+use Fossology\UI\Api\Controllers\OsselotController;
 use Fossology\UI\Api\Controllers\ReportController;
 use Fossology\UI\Api\Controllers\SearchController;
 use Fossology\UI\Api\Controllers\UploadController;
@@ -164,13 +166,23 @@ if ($dbConnected) {
 }
 
 // Regex for matching a valid path parameter
-$pattern = "[\\w\\d\\-\\.@_]+}";
+$pattern = "[\\w\\d\\-\\.@_]+";
+
+// Regex for matching group names, which may contain spaces
+$groupPattern = "[\\w\\d\\-\\.@_ ]+";
 
 //////////////////////////OPTIONS/////////////////////
 $app->options('/{routes:.+}', AuthController::class . ':optionsVerification');
 
 //////////////////////////AUTH/////////////////////
 $app->post('/tokens', AuthController::class . ':createNewJwtToken');
+
+//////////////////////////OSSELOT/////////////////////
+$app->group('/osselot',
+  function (\Slim\Routing\RouteCollectorProxy $app) {
+    $app->get('/packages/{package:[\\w\\d\\-\\.@_]+}/versions', OsselotController::class . ':getPackageVersions');
+    $app->any('/{params:.*}', BadRequestController::class);
+  });
 
 //////////////////////////UPLOADS/////////////////////
 $app->group('/uploads',
@@ -214,6 +226,7 @@ $app->group('/uploads',
     $app->get('/{id:\\d+}/conf', ConfController::class . ':getConfInfo');
     $app->put('/{id:\\d+}/conf', ConfController::class . ':updateConfData');
     $app->get('/{id:\\d+}/copyrights', UploadController::class . ':getUploadCopyrights');
+    $app->post('/{id:\\d+}/osselot/import', OsselotController::class . ':importOsselotReport');
     ////////////////////////// BULK FOR CX OPERATIONS /////////////////////
     $app->group('/{id:\\d+}/item/{itemId:\\d+}', function (\Slim\Routing\RouteCollectorProxy $app) {
       $app->get('/copyrights', CopyrightController::class . ':getFileCopyrights');
@@ -275,10 +288,10 @@ $app->group('/uploads',
 $app->group('/users',
   function (\Slim\Routing\RouteCollectorProxy $app) use ($pattern) {
     $app->get('/self', UserController::class . ':getCurrentUser');
-    $app->get("[/{pathParam:$pattern]", UserController::class . ':getUsers');
-    $app->put("/{pathParam:$pattern", UserController::class . ':updateUser');
+    $app->get("[/{pathParam:$pattern}]", UserController::class . ':getUsers');
+    $app->put("/{pathParam:$pattern}", UserController::class . ':updateUser');
     $app->post('', UserController::class . ':addUser');
-    $app->delete("/{pathParam:$pattern", UserController::class . ':deleteUser');
+    $app->delete("/{pathParam:$pattern}", UserController::class . ':deleteUser');
     $app->post('/tokens', UserController::class . ':createRestApiToken');
     $app->get('/tokens/{type:\\w+}', UserController::class . ':getTokens');
     $app->any('/{params:.*}', BadRequestController::class);
@@ -300,15 +313,16 @@ $app->group('/obligations',
 
 ////////////////////////////GROUPS/////////////////////
 $app->group('/groups',
-  function (\Slim\Routing\RouteCollectorProxy $app) use ($pattern) {
+  function (\Slim\Routing\RouteCollectorProxy $app) use ($pattern, $groupPattern) {
     $app->get('', GroupController::class . ':getGroups');
     $app->post('', GroupController::class . ':createGroup');
-    $app->post("/{pathParam:$pattern/user/{userPathParam:$pattern", GroupController::class . ':addMember');
-    $app->delete("/{pathParam:$pattern", GroupController::class . ':deleteGroup');
-    $app->delete("/{pathParam:$pattern/user/{userPathParam:$pattern", GroupController::class . ':deleteGroupMember');
+    $app->post("/{pathParam:$groupPattern}/user/{userPathParam:$pattern}", GroupController::class . ':addMember');
+    $app->put("/{pathParam:$groupPattern}", GroupController::class . ':updateGroup');
+    $app->delete("/{pathParam:$groupPattern}", GroupController::class . ':deleteGroup');
+    $app->delete("/{pathParam:$groupPattern}/user/{userPathParam:$pattern}", GroupController::class . ':deleteGroupMember');
     $app->get('/deletable', GroupController::class . ':getDeletableGroups');
-    $app->get("/{pathParam:$pattern/members", GroupController::class . ':getGroupMembers');
-    $app->put("/{pathParam:$pattern/user/{userPathParam:$pattern", GroupController::class . ':changeUserPermission');
+    $app->get("/{pathParam:$groupPattern}/members", GroupController::class . ':getGroupMembers');
+    $app->put("/{pathParam:$groupPattern}/user/{userPathParam:$pattern}", GroupController::class . ':changeUserPermission');
     $app->any('/{params:.*}', BadRequestController::class);
   });
 
@@ -337,6 +351,7 @@ $app->group('/search',
 $app->group('/maintenance',
   function (\Slim\Routing\RouteCollectorProxy $app) {
     $app->post('', MaintenanceController::class . ':createMaintenance');
+    $app->get('', MaintenanceController::class . ':getMaintenanceInfo');
     $app->any('/{params:.*}', BadRequestController::class);
   });
 
@@ -402,6 +417,7 @@ $app->group('/license',
     $app->get('/export-csv', LicenseController::class . ':exportAdminLicenseToCSV');
     $app->post('/import-json', LicenseController::class . ':handleImportLicense');
     $app->get('/export-json', LicenseController::class . ':exportAdminLicenseToJSON');
+    $app->get('/bulk-text/export', LicenseController::class . ':exportBulkText');
     $app->post('', LicenseController::class . ':createLicense');
     $app->put('/verify/{shortname:.+}', LicenseController::class . ':verifyLicense');
     $app->put('/merge/{shortname:.+}', LicenseController::class . ':mergeLicense');
@@ -415,6 +431,18 @@ $app->group('/license',
     $app->delete('/admincandidates/{id:\\d+}',
       LicenseController::class . ':deleteAdminLicenseCandidate');
     $app->put('/adminacknowledgements', LicenseController::class . ':handleAdminLicenseAcknowledgement');
+    $app->any('/{params:.*}', BadRequestController::class);
+  });
+
+/////////////////LICENSE COMPATIBILITY RULES////////////
+$app->group('/license-compatibility-rules',
+  function (\Slim\Routing\RouteCollectorProxy $app) {
+    $app->get('', LicenseCompatibilityRuleController::class . ':getRules');
+    $app->post('', LicenseCompatibilityRuleController::class . ':createRule');
+    $app->get('/export', LicenseCompatibilityRuleController::class . ':exportRules');
+    $app->post('/import', LicenseCompatibilityRuleController::class . ':importRules');
+    $app->put('/{id:\\d+}', LicenseCompatibilityRuleController::class . ':updateRule');
+    $app->delete('/{id:\\d+}', LicenseCompatibilityRuleController::class . ':deleteRule');
     $app->any('/{params:.*}', BadRequestController::class);
   });
 
@@ -482,10 +510,9 @@ $errorMiddleware->setErrorHandler(
 $errorMiddleware->setErrorHandler(
   HttpMethodNotAllowedException::class,
   function (ServerRequestInterface $request, Throwable $exception, bool $displayErrorDetails) {
-    $response = new Response();
-    $response->getBody()->write('405 NOT ALLOWED');
-
-    $response = $response->withStatus(405);
+    $response = new ResponseHelper();
+    $error = new Info(405, "Method not allowed", InfoType::ERROR);
+    $response = $response->withJson($error->getArray(), $error->getCode());
     plugin_unload();
     return CorsHelper::addCorsHeaders($response);
   });

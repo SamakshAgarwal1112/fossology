@@ -3,6 +3,7 @@
  SPDX-FileCopyrightText: © 2015-2019, 2021 Siemens AG
  SPDX-FileCopyrightText: © 2020 Robert Bosch GmbH
  SPDX-FileCopyrightText: © Dineshkumar Devarajan <Devarajan.Dineshkumar@in.bosch.com>
+ SPDX-FileCopyrightText: © Fossology contributors
  Author: Shaheem Azmal<shaheem.azmal@siemens.com>,
          Anupam Ghosh <anupam.ghosh@siemens.com>
 
@@ -274,40 +275,54 @@ class AjaxShowJobs extends \FO_Plugin
         $jobArr['jobQueue'][$key]['isReady'] = ($singleJobQueue['jq_end_bits'] ==
           1);
 
-        switch ($singleJobQueue['jq_type']) {
-          case 'readmeoss':
-            $jobArr['jobQueue'][$key]['download'] = "ReadMeOss";
-            break;
-          case 'spdx2':
-            $jobArr['jobQueue'][$key]['download'] = "SPDX2 report";
-            break;
-          case 'spdx2tv':
-            $jobArr['jobQueue'][$key]['download'] = "SPDX2 tag/value report";
-            break;
-          case 'spdx2csv':
-            $jobArr['jobQueue'][$key]['download'] = "SPDX2 CSV report";
-            break;
-          case 'dep5':
-            $jobArr['jobQueue'][$key]['download'] = "DEP5 copyright file";
-            break;
-          case 'reportImport':
-            $jobArr['jobQueue'][$key]['download'] = "uploaded SPDX2 report";
-            break;
-          case 'unifiedreport':
-            $jobArr['jobQueue'][$key]['download'] = "Unified Report";
-            break;
-          case 'clixml':
-            $jobArr['jobQueue'][$key]['download'] = "Clixml Report";
-            break;
-          case 'cyclonedx':
-            $jobArr['jobQueue'][$key]['download'] = "CycloneDX json Report";
-            break;
-          case 'decisionexporter':
-            $jobArr['jobQueue'][$key]['download'] = "FOSSology Decisions";
-            break;
-          default:
-            $jobArr['jobQueue'][$key]['download'] = "";
+        $reportName = "";
+        if ($this->showJobsDao->isJobIdPresentInReportGen($singleJobQueue['jq_job_fk'])) {
+          switch ($singleJobQueue['jq_type']) {
+            case 'readmeoss':
+              $reportName = "ReadMeOss";
+              break;
+            case 'spdx2':
+              $reportName = "SPDX2 report";
+              break;
+            case 'spdx2tv':
+              $reportName = "SPDX2 tag/value report";
+              break;
+            case 'spdx2csv':
+              $reportName = "SPDX2 CSV report";
+              break;
+            case 'spdx3jsonld':
+              $reportName = "SPDX3 JSON-LD report";
+              break;
+            case 'spdx3json':
+              $reportName = "SPDX3 JSON report";
+              break;
+            case 'spdx3rdf':
+              $reportName = "SPDX3 RDF report";
+              break;
+            case 'spdx3tv':
+              $reportName = "SPDX3 tag/value report";
+              break;
+            case 'dep5':
+              $reportName = "DEP5 copyright file";
+              break;
+            case 'reportImport':
+              $reportName = "uploaded SPDX2 report";
+              break;
+            case 'unifiedreport':
+              $reportName = "Unified Report";
+              break;
+            case 'clixml':
+              $reportName = "Clixml Report";
+              break;
+            case 'cyclonedx':
+              $reportName = "CycloneDX json Report";
+              break;
+            case 'decisionexporter':
+              $reportName = "FOSSology Decisions";
+              break;
+          }
         }
+        $jobArr['jobQueue'][$key]['download'] = $reportName;
       }
       if (! empty($jobs['upload'])) {
         $uploadArr = array(
@@ -427,7 +442,7 @@ class AjaxShowJobs extends \FO_Plugin
     $jobsInfo = $this->showJobsDao->getJobInfo($jobs);
     usort($jobsInfo, array($this,"compareJobsInfo"));
 
-    $pagination = ($totalPages > 1 ? MenuPage($page, $totalPages, $uri) : "");
+    $pagination = ($totalPages > 0 ? MenuPage($page, $totalPages, $uri) : "");
 
     $showJobData = $this->getShowJobsForEachJob($jobsInfo, false);
     return new JsonResponse(

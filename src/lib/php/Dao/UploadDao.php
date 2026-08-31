@@ -11,6 +11,7 @@ namespace Fossology\Lib\Dao;
 use Fossology\Lib\Data\Tree\Item;
 use Fossology\Lib\Data\Tree\ItemTreeBounds;
 use Fossology\Lib\Data\Upload\Upload;
+use Fossology\Lib\Auth\Auth;
 use Fossology\Lib\Data\Upload\UploadEvents;
 use Fossology\Lib\Data\UploadStatus;
 use Fossology\Lib\Db\DbManager;
@@ -136,6 +137,30 @@ class UploadDao
     $stmt = __METHOD__;
     $queryResult = $this->dbManager->getRows("SELECT * FROM upload where pfile_fk IS NOT NULL",
         array(), $stmt);
+
+    $results = array();
+    foreach ($queryResult as $row) {
+      $results[] = Upload::createFromTable($row);
+    }
+
+    return $results;
+  }
+
+  /**
+   * Get all uploads accessible by a group.
+   * @param int $groupId Group id
+   * @return Upload[] Array of Upload objects
+   */
+  public function getAccessibleUploads($groupId)
+  {
+    $stmt = __METHOD__;
+    $permNone = Auth::PERM_NONE;
+    $sql = "SELECT u.* FROM upload u
+            LEFT JOIN perm_upload p ON p.upload_fk = u.upload_pk AND p.group_fk = $1
+            WHERE u.pfile_fk IS NOT NULL
+            AND (p.perm > $permNone OR u.public_perm > $permNone)";
+
+    $queryResult = $this->dbManager->getRows($sql, array($groupId), $stmt);
 
     $results = array();
     foreach ($queryResult as $row) {
@@ -287,7 +312,7 @@ class UploadDao
    */
   public function getAssigneeDate(int $uploadId): ?string
   {
-    $sql = "SELECT event_ts FROM upload_events WHERE upload_fk = $1 " .
+    $sql = "SELECT MIN(event_ts) as event_ts FROM upload_events WHERE upload_fk = $1 " .
       "AND event_type = " . UploadEvents::ASSIGNEE_EVENT;
     $row = $this->dbManager->getSingleRow($sql, [$uploadId], __METHOD__);
     if (empty($row) || empty($row["event_ts"])) {
@@ -304,7 +329,7 @@ class UploadDao
    */
   public function getClosedDate(int $uploadId): ?string
   {
-    $sql = "SELECT event_ts FROM upload_events WHERE upload_fk = $1 " .
+    $sql = "SELECT MAX(event_ts) as event_ts FROM upload_events WHERE upload_fk = $1 " .
       "AND event_type = " . UploadEvents::UPLOAD_CLOSED_EVENT;
     $row = $this->dbManager->getSingleRow($sql, [$uploadId], __METHOD__);
     if (empty($row) || empty($row["event_ts"])) {
@@ -319,24 +344,64 @@ class UploadDao
    * @return array with duration and durationSort when upload was closed
    *                   or rejected.
    */
-  public function getClearingDuration(int $uploadId): ?array
+  public function getClearingDuration(int $uploadId): array
   {
-    $duration = "NA";
-    $assignDate = $this->getAssigneeDate($uploadId);
-    $closingDate = $this->getClosedDate($uploadId);
-    $durationSort = 0;
-    if ($assignDate != null && $closingDate != null) {
-      try {
-        $closingDate = new DateTime($closingDate);
-        $assignDate = new DateTime($assignDate);
-        if ($assignDate < $closingDate) {
-          $duration = HumanDuration($closingDate->diff($assignDate));
-          $durationSort = $closingDate->getTimestamp() - $assignDate->getTimestamp();
-        }
-      } catch (Exception $_) {
-      }
+    $batch = $this->getClearingDurationsBatch(array($uploadId));
+    return $batch[$uploadId] ?? ['NA', 0];
+  }
+
+  /**
+   * Get clearing durations for a list of uploads.
+   * @param int[] $uploadIds
+   * @return array Map of upload_pk => array(duration, durationSort)
+   */
+  public function getClearingDurationsBatch(array $uploadIds): array
+  {
+    if (empty($uploadIds)) {
+      return array();
     }
-    return array($duration, $durationSort);
+
+    $uploadIds = array_unique(array_filter($uploadIds));
+    if (empty($uploadIds)) {
+      return array();
+    }
+
+    $results = array();
+    foreach ($uploadIds as $id) {
+      $results[(int)$id] = array("NA", 0);
+    }
+
+    $uploadIdsStr = '{' . implode(',', array_map('intval', $uploadIds)) . '}';
+
+    $sql = "SELECT upload_fk, " .
+           "MIN(CASE WHEN event_type = $2 THEN event_ts END) as assignee_ts, " .
+           "MAX(CASE WHEN event_type = $3 THEN event_ts END) as closed_ts " .
+           "FROM upload_events " .
+           "WHERE upload_fk = ANY($1::int[]) AND event_type IN ($2, $3) " .
+           "GROUP BY upload_fk";
+
+    $rows = $this->dbManager->getRows($sql, array($uploadIdsStr, UploadEvents::ASSIGNEE_EVENT, UploadEvents::UPLOAD_CLOSED_EVENT), __METHOD__);
+
+    foreach ($rows as $row) {
+      $id = (int)$row['upload_fk'];
+      $duration = "NA";
+      $durationSort = 0;
+
+      if (!empty($row['assignee_ts']) && !empty($row['closed_ts'])) {
+        try {
+          $assignDate = new DateTime($row['assignee_ts']);
+          $closingDate = new DateTime($row['closed_ts']);
+          if ($assignDate < $closingDate) {
+            $duration = HumanDuration($closingDate->diff($assignDate));
+            $durationSort = $closingDate->getTimestamp() - $assignDate->getTimestamp();
+          }
+        } catch (\Exception $_) {
+        }
+      }
+      $results[$id] = array($duration, $durationSort);
+    }
+
+    return $results;
   }
   /**
    * \brief Get the uploadtree table name for this upload_pk
@@ -607,6 +672,11 @@ class UploadDao
     $this->permissionDao->makeAccessibleToAllGroupsOf($uploadId, $userId, $perm);
   }
 
+  public function filterAccessibleUploads(array $uploadIds, $groupId)
+  {
+    return $this->permissionDao->filterAccessibleUploads($uploadIds, $groupId);
+  }
+
   /**
    * @param int $uploadId
    * @return array with keys sha1, md5, sha256
@@ -797,6 +867,84 @@ ORDER BY lft asc
   }
 
   /**
+   * Get user SPDX defaults for a specific upload (based on upload owner)
+   * @param int $uploadId
+   * @return string Comma-separated checkbox values
+   */
+  private function getUserSPDXDefaultsForUpload($uploadId)
+  {
+    $stmt = __METHOD__ . '.getOwner';
+    $sql = "SELECT user_fk FROM upload WHERE upload_pk = $1";
+    $uploadOwner = $this->dbManager->getSingleRow($sql, array($uploadId), $stmt);
+
+    if (empty($uploadOwner)) {
+      return "unchecked,unchecked,unchecked";
+    }
+
+    $userId = $uploadOwner['user_fk'];
+
+    $stmt = __METHOD__ . '.getUserDefaults';
+    $sql = "SELECT spdx_settings FROM users WHERE user_pk = $1";
+    $userDefaults = $this->dbManager->getSingleRow($sql, array($userId), $stmt);
+
+    if (empty($userDefaults) || empty($userDefaults['spdx_settings'])) {
+      return "unchecked,unchecked,unchecked";
+    }
+
+    $settings = explode(',', $userDefaults['spdx_settings']);
+    if (count($settings) < 3) {
+      $settings = array_pad($settings, 3, 'unchecked');
+    }
+
+    $osselotExport = $settings[0];
+    $spdxLicenseComment = $settings[1];
+    $ignoreFilesWOInfo = $settings[2];
+
+    $result = "$spdxLicenseComment,$ignoreFilesWOInfo,$osselotExport";
+
+    return $result;
+  }
+
+  /**
+   * @brief Get cyclone dx settings for a user
+   * @param int $uploadId Upload ID to get user for
+   * @return string Comma separated values for cyclonedxLicenseComment, ignoreFilesWOInfo, osselotExport
+   */
+  public function getCyclonedxSettings($uploadId)
+  {
+    $stmt = __METHOD__ . '.getOwner';
+    $sql = "SELECT user_fk FROM upload WHERE upload_pk = $1";
+    $uploadOwner = $this->dbManager->getSingleRow($sql, array($uploadId), $stmt);
+
+    if (empty($uploadOwner)) {
+      return "unchecked,unchecked,unchecked";
+    }
+
+    $userId = $uploadOwner['user_fk'];
+
+    $stmt = __METHOD__ . '.getUserDefaults';
+    $sql = "SELECT cyclonedx_settings FROM users WHERE user_pk = $1";
+    $userDefaults = $this->dbManager->getSingleRow($sql, array($userId), $stmt);
+
+    if (empty($userDefaults) || empty($userDefaults['cyclonedx_settings'])) {
+      return "unchecked,unchecked,unchecked";
+    }
+
+    $settings = explode(',', $userDefaults['cyclonedx_settings']);
+    if (count($settings) < 3) {
+      $settings = array_pad($settings, 3, 'unchecked');
+    }
+
+    $osselotExport = $settings[0];
+    $cyclonedxLicenseComment = $settings[1];
+    $ignoreFilesWOInfo = $settings[2];
+
+    $result = "$cyclonedxLicenseComment,$ignoreFilesWOInfo,$osselotExport";
+
+    return $result;
+  }
+
+  /**
    * @brief Update report info for upload
    * @param int $uploadId  Upload ID to update
    * @param string $column Column to update
@@ -848,7 +996,7 @@ ORDER BY lft asc
   public function getGlobalDecisionSettingsFromInfo($uploadId, $setGlobal=null)
   {
     $stmt = __METHOD__ . 'get';
-    $sql = "SELECT ri_globaldecision FROM report_info WHERE upload_fk = $1";
+    $sql = "SELECT ri_globaldecision, ri_spdx_selection FROM report_info WHERE upload_fk = $1";
     $row = $this->dbManager->getSingleRow($sql, array($uploadId), $stmt);
     if (empty($row)) {
       if ($setGlobal === null) {
@@ -856,8 +1004,10 @@ ORDER BY lft asc
         $setGlobal = 1;
       }
       $stmt = __METHOD__ . 'ifempty';
-      $sql = "INSERT INTO report_info (upload_fk, ri_globaldecision) VALUES ($1, $2) RETURNING ri_globaldecision";
-      $row = $this->dbManager->getSingleRow($sql, array($uploadId, $setGlobal), $stmt);
+      $userSPDXDefaults = $this->getUserSPDXDefaultsForUpload($uploadId);
+      $sql = "INSERT INTO report_info (upload_fk, ri_globaldecision, ri_spdx_selection) VALUES ($1, $2, $3) RETURNING ri_globaldecision";
+      $row = $this->dbManager->getSingleRow($sql, array($uploadId, $setGlobal, $userSPDXDefaults), $stmt);
+
     }
 
     if (!empty($setGlobal)) {

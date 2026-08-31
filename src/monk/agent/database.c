@@ -1,6 +1,7 @@
 /*
  Author: Daniele Fognini, Andreas Wuerl
  SPDX-FileCopyrightText: © 2013-2017, 2021 Siemens AG
+ SPDX-FileCopyrightText: © Fossology contributors
 
  SPDX-License-Identifier: GPL-2.0-only
 */
@@ -27,16 +28,24 @@ PGresult* queryFileIdsForUploadAndLimits(fo_dbManager* dbManager, int uploadId,
                              "SELECT distinct ON(ut.uploadtree_pk, ut.pfile_fk, scopesort) ut.pfile_fk pfile_fk, ut.uploadtree_pk, decision_type,"
                              " CASE cd.scope WHEN 1 THEN 1 ELSE 0 END AS scopesort"
                              " FROM %s AS ut "
-                             " LEFT JOIN clearing_decision cd ON "
-                             "  ((ut.uploadtree_pk = cd.uploadtree_fk AND scope = 0 AND cd.group_fk = $5) "
-                             "  OR (ut.pfile_fk = cd.pfile_fk AND scope = 1)) "
+                             " LEFT JOIN clearing_decision cd ON ("
+                             "  (ut.uploadtree_pk = cd.uploadtree_fk AND cd.scope = 0 AND cd.group_fk = $5)"
+                             "  OR (EXISTS ("
+                             "    SELECT 1 FROM report_info ri WHERE ri.upload_fk=$1 AND ri.ri_globaldecision=1"
+                             "  ) AND ut.pfile_fk = cd.pfile_fk AND cd.scope = 1)"
+                             ")"
                              " WHERE upload_fk=$1 AND (ufile_mode&x'3C000000'::int)=0 AND (lft BETWEEN $2 AND $3) AND ut.pfile_fk != 0"
                              " ORDER BY ut.uploadtree_pk, scopesort, ut.pfile_fk, clearing_decision_pk DESC"
                              ") itemView WHERE decision_type!=$4 OR decision_type IS NULL";
-  char* nonVoidPfile = "SELECT pfile_fk FROM allPfileData"
-                       " WHERE pfile_fk NOT IN (SELECT pfile_fk FROM license_file WHERE rf_fk IN"
-                       " (SELECT rf_pk FROM " LICENSE_REF_TABLE
-                       " WHERE rf_shortname = ANY(VALUES('No_license_found'), ('Void'))))";
+  char* nonVoidPfile = ", realFindings AS ("
+                       " SELECT DISTINCT lf.pfile_fk"
+                       " FROM license_file lf"
+                       " INNER JOIN ars_master am ON lf.agent_fk = am.agent_fk AND am.upload_fk = $1"
+                       " INNER JOIN " LICENSE_REF_TABLE " lr ON lf.rf_fk = lr.rf_pk"
+                       " WHERE lr.rf_shortname NOT IN ('No_license_found', 'Void')"
+                       ")"
+                       " SELECT pfile_fk FROM allPfileData"
+                       " WHERE pfile_fk IN (SELECT pfile_fk FROM realFindings)";
 
   if (!ignoreIrre && !scanFindings)
   {
@@ -218,4 +227,104 @@ int saveDiffHighlightsToDb(fo_dbManager* dbManager, const GArray* matchedInfo, l
   }
 
   return 1;
+}
+
+/**
+ * \brief Query all active custom phrases from the database
+ * \param dbManager Database manager
+ * \return GArray* of Phrase* structures (caller must free with phrases_free)
+ */
+GArray* queryActiveCustomPhrases(fo_dbManager* dbManager) {
+  /* Single JOIN avoids N+1: one query instead of 1 + (1 per phrase). */
+  PGresult* result = fo_dbManager_ExecPrepared(
+    fo_dbManager_PrepareStamement(
+      dbManager,
+      "queryActiveCustomPhrasesWithMappings",
+      "SELECT cp.cp_pk, cp.text, cp.acknowledgement, cp.comments,"
+      "       cplm.rf_fk, cplm.removing,"
+      "       cplm.comment, cplm.reportinfo, cplm.acknowledgement"
+      " FROM custom_phrase cp"
+      " LEFT JOIN custom_phrase_license_map cplm ON cp.cp_pk = cplm.cp_fk"
+      " WHERE cp.is_active = true"
+      " ORDER BY cp.cp_pk"
+    )
+  );
+
+  GArray* phrases = g_array_new(FALSE, FALSE, sizeof(Phrase*));
+
+  if (!result)
+    return phrases;
+
+  int numRows = PQntuples(result);
+  Phrase* current = NULL;
+
+  for (int i = 0; i < numRows; i++) {
+    long cpId = atol(PQgetvalue(result, i, 0));
+
+    if (!current || current->cpId != cpId) {
+      Phrase* phrase = (Phrase*)g_malloc0(sizeof(Phrase));
+      phrase->cpId = cpId;
+      phrase->text = g_strdup(PQgetvalue(result, i, 1));
+      phrase->acknowledgement = PQgetisnull(result, i, 2) ? NULL : g_strdup(PQgetvalue(result, i, 2));
+      phrase->comments = PQgetisnull(result, i, 3) ? NULL : g_strdup(PQgetvalue(result, i, 3));
+      phrase->licenseMappings = g_array_new(FALSE, FALSE, sizeof(LicenseMapping));
+      phrase->stmtName = NULL;
+      g_array_append_val(phrases, phrase);
+      current = phrase;
+    }
+
+    /* LEFT JOIN row with no mapping has rf_fk = NULL, skip it. */
+    if (!PQgetisnull(result, i, 4)) {
+      LicenseMapping mapping = {0};
+      mapping.rfPk = atol(PQgetvalue(result, i, 4));
+      mapping.removing = (strcmp(PQgetvalue(result, i, 5), "t") == 0) ? 1 : 0;
+      mapping.comment = PQgetisnull(result, i, 6) ? NULL : g_strdup(PQgetvalue(result, i, 6));
+      mapping.reportinfo = PQgetisnull(result, i, 7) ? NULL : g_strdup(PQgetvalue(result, i, 7));
+      mapping.acknowledgement = PQgetisnull(result, i, 8) ? NULL : g_strdup(PQgetvalue(result, i, 8));
+      g_array_append_val(current->licenseMappings, mapping);
+    }
+  }
+
+  PQclear(result);
+  return phrases;
+}
+
+/**
+ * \brief Free a single Phrase structure
+ * \param phrase Phrase to free
+ */
+void phrase_free(Phrase* phrase) {
+  if (!phrase) return;
+
+  g_free(phrase->text);
+  g_free(phrase->acknowledgement);
+  g_free(phrase->comments);
+  g_free(phrase->stmtName);
+
+  if (phrase->licenseMappings) {
+    for (guint i = 0; i < phrase->licenseMappings->len; i++) {
+      LicenseMapping* m = &g_array_index(phrase->licenseMappings, LicenseMapping, i);
+      g_free(m->comment);
+      g_free(m->reportinfo);
+      g_free(m->acknowledgement);
+    }
+    g_array_free(phrase->licenseMappings, TRUE);
+  }
+
+  g_free(phrase);
+}
+
+/**
+ * \brief Free an array of Phrase structures
+ * \param phrases GArray* of Phrase* to free
+ */
+void phrases_free(GArray* phrases) {
+  if (!phrases) return;
+
+  for (guint i = 0; i < phrases->len; i++) {
+    Phrase* phrase = g_array_index(phrases, Phrase*, i);
+    phrase_free(phrase);
+  }
+
+  g_array_free(phrases, TRUE);
 }

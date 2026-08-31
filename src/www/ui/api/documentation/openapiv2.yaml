@@ -1,5 +1,7 @@
 # SPDX-FileCopyrightText: © 2017-2023 Siemens AG
 # SPDX-FileCopyrightText: © 2021 Orange by Piotr Pszczola <piotr.pszczola@orange.com>
+# SPDX-FileCopyrightText: © 2025 Tiyasa Kundu <tiyasakundu20@gmail.com>
+# SPDX-FileContributor: Kaushlendra Pratap <kaushlendra-pratap.singh@siemens.com>
 
 # SPDX-License-Identifier: GPL-2.0-only
 
@@ -258,6 +260,34 @@ paths:
         default:
           $ref: '#/components/responses/defaultResponse'
   /maintenance:
+    get:
+      operationId: getMaintenanceInfo
+      tags:
+        - Maintenance
+      summary: Get details about the last completed maintenance job
+      description: >
+        Retrieve the timestamp of the last successfully completed maintenance job.
+      responses:
+        '200':
+          description: Maintenance information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceInfo'
+        '403':
+          description: Access denied.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '500':
+          description: Internal Server Error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
     post:
       operationId: initiateMaintenance
       tags:
@@ -462,75 +492,6 @@ paths:
         default:
           $ref: '#/components/responses/defaultResponse'
 
-  /obligations/import-json:
-    post:
-      operationId: importObligationsFromJSON
-      tags:
-        - License
-      summary: Import an obligation json file
-      description: >
-        Import an obligation json file
-      requestBody:
-        description: Include the JSON file
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                fileInput:
-                  type: string
-                  format: binary
-                  description: JSON to be imported
-              required:
-                - fileInput
-      responses:
-        '400':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
-        '200':
-          description: Successfully imported
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
-        default:
-          $ref: '#/components/responses/defaultResponse'
-
-  /obligations/export-json:
-    get:
-      operationId: exportObligationsToJSON
-      parameters:
-        - name: id
-          description: Obligation id to export, 0 for all
-          in: query
-          required: false
-          schema:
-            type: integer
-      tags:
-        - License
-      summary: Export a json obligation list
-      description: >
-        Export a json license obligation list
-      responses:
-        '200':
-          description: Successfully exported
-          content:
-            text/json:
-              schema:
-                type: string
-                format: binary
-        '403':
-          description: Route is not accessible
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
-        default:
-          $ref: '#/components/responses/defaultResponse'
   /obligations:
     get:
       operationId: getAllObligationsData
@@ -640,13 +601,29 @@ paths:
       requestBody:
         description: >
           Comment on the status, required for Closed and Rejected states.
-          Ignored for others.
+          Use the application/json for advanced usage.
         content:
           text/plain:
             schema:
               description: The comment for new status
               type: string
               example: "The upload cleared for use."
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+                  description: The comment for new status
+                  example: "The upload cleared for use."
+                name:
+                  type: string
+                  description: New name of the upload.
+                  example: my_edited_upload.zip
+                uploadDescription:
+                  type: string
+                  description: Updated description for the upload.
+                  example: This is updated description.
       responses:
         '202':
           description: Upload will be updated
@@ -3151,6 +3128,17 @@ paths:
       summary: Gets all jobs created by the logged in user
       description: Returns all jobs with their status created by the logged in user
       parameters:
+        - name: status
+          description: Returns only jobs with the selected status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - Processing
+              - Queued
+              - Completed
+              - Failed
+          in: query
         - name: limit
           required: false
           schema:
@@ -3162,6 +3150,14 @@ paths:
           schema:
             type: integer
             minimum: 1
+          in: query
+        - name: sort
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
           in: query
         - name: upload
           required: false
@@ -3228,6 +3224,17 @@ paths:
       summary: Gets all jobs created by all users
       description: Returns all jobs with their status created by every user. This API returns a response only if the requesting user is an Admin.
       parameters:
+        - name: status
+          description: Returns only jobs with the selected status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - Processing
+              - Queued
+              - Completed
+              - Failed
+          in: query
         - name: limit
           required: false
           schema:
@@ -3239,6 +3246,14 @@ paths:
           schema:
             type: integer
             minimum: 1
+          in: query
+        - name: sort
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
           in: query
       responses:
         '200':
@@ -4025,7 +4040,7 @@ paths:
           schema:
             type: string
       responses:
-        '200':
+        '201':
           description: Group has been added
           content:
             application/json:
@@ -4063,6 +4078,61 @@ paths:
       responses:
         '202':
           description: User group will be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+    put:
+      operationId: updateGroupByName
+      tags:
+        - Organize
+        - Groups
+        - Admin
+      summary: Rename group by name
+      description: >
+        Renames a single group by name. Only an admin of the group can rename it.
+      requestBody:
+        description: New name of the group
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateGroup'
+      responses:
+        '200':
+          description: Group has been renamed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '400':
+          description: No group name provided or the new name is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Not admin of the group
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '404':
+          description: Group not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '409':
+          description: Another group already uses the new name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '500':
+          description: Internal server error with details
           content:
             application/json:
               schema:
@@ -4270,10 +4340,15 @@ paths:
               - dep5
               - spdx2
               - spdx2tv
+              - spdx2csv
               - readmeoss
               - unifiedreport
               - clixml
               - cyclonedx
+              - spdx3json
+              - spdx3rdf
+              - spdx3jsonld
+              - spdx3tv
         - name: groupName
           description: The group name to chose while generating a report
           in: query
@@ -4703,72 +4778,81 @@ paths:
                 $ref: '#/components/schemas/Info'
         default:
           $ref: '#/components/responses/defaultResponse'
-  /license/import-json:
-    post:
-      operationId: handleImportLicense
+
+  /license/bulk-text/export:
+    get:
+      operationId: exportBulkText
       tags:
         - License
-      summary: Import a json license
+        - Admin
+      summary: Export bulk scan text as CSV or JSON
       description: >
-        Import a json license to the database
-      requestBody:
-        description: Include the JSON file
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              properties:
-                fileInput:
-                  type: string
-                  format: binary
-                  description: JSON to be imported
-              required:
-                - fileInput
-      responses:
-        '400':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
-        '200':
-          description: Successfully imported
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
-        default:
-          $ref: '#/components/responses/defaultResponse'
-  /license/export-json:
-    get:
-      operationId: exportAdminLicenseToJSON
+        Export bulk scan text entries from license_ref_bulk.
+        Defaults are format=json and filter=all.
       parameters:
-        - name: id
-          description: License id to export, 0 for all
+        - name: format
           in: query
           required: false
+          description: Output format.
+          schema:
+            type: string
+            enum:
+              - csv
+              - json
+            default: json
+        - name: filter
+          in: query
+          required: false
+          description: Filter mode for export.
+          schema:
+            type: string
+            enum:
+              - all
+              - user
+              - group
+            default: all
+        - name: userId
+          in: query
+          required: false
+          description: User ID, required when filter=user.
           schema:
             type: integer
-      tags:
-        - License
-      summary: Export a json license
-      description: >
-        Export a json license
+            minimum: 1
+        - name: groupId
+          in: query
+          required: false
+          description: Group ID, required when filter=group.
+          schema:
+            type: integer
+            minimum: 1
+        - name: delimiter
+          in: query
+          required: false
+          description: CSV delimiter character (used only when format=csv).
+          schema:
+            type: string
+            default: ','
+        - name: enclosure
+          in: query
+          required: false
+          description: CSV enclosure character (used only when format=csv).
+          schema:
+            type: string
+            default: '"'
       responses:
         '200':
           description: Successfully exported
           content:
             text/csv:
-              schema:
-                type: string
-                format: binary
+            application/json:
+        '400':
+          description: Validation error in query parameters
+          content:
+            application/json:
         '403':
           description: Route is not accessible
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Info'
         default:
           $ref: '#/components/responses/defaultResponse'
   /license/{shortname}:
@@ -5165,6 +5249,290 @@ paths:
         default:
           $ref: '#/components/responses/defaultResponse'
 
+  /license-compatibility-rules:
+    get:
+      operationId: getLicenseCompatibilityRules
+      tags:
+        - License
+        - Admin
+      summary: Get the license compatibility rules
+      description: >
+        Get the list of license compatibility rules from the server.
+      parameters:
+        - name: page
+          description: Page number for responses
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          description: Limit of rules per request
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+        - name: search
+          description: Filter the rules on their description
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of the license compatibility rules
+          headers:
+            X-Total-Pages:
+              description: Total number of pages available
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LicenseCompatibilityRule'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+    post:
+      operationId: createLicenseCompatibilityRule
+      tags:
+        - License
+        - Admin
+      summary: Create a new license compatibility rule
+      description: >
+        Create a new license compatibility rule. At least one license or
+        license type has to be given, a rule without any of them would shadow
+        the default compatibility of the server.
+      requestBody:
+        description: New license compatibility rule
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewLicenseCompatibilityRule'
+      responses:
+        '201':
+          description: Rule added successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+
+  /license-compatibility-rules/{id}:
+    parameters:
+      - name: id
+        required: true
+        description: Id of the license compatibility rule
+        in: path
+        schema:
+          type: integer
+    put:
+      operationId: updateLicenseCompatibilityRule
+      tags:
+        - License
+        - Admin
+      summary: Update a license compatibility rule
+      description: >
+        Update an existing license compatibility rule. Only the fields sent in
+        the request body are updated.
+      requestBody:
+        description: Values of the rule to update
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditLicenseCompatibilityRule'
+      responses:
+        '200':
+          description: Rule updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '404':
+          description: Rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+    delete:
+      operationId: deleteLicenseCompatibilityRule
+      tags:
+        - License
+        - Admin
+      summary: Delete a license compatibility rule
+      description: >
+        Permanently remove an existing license compatibility rule.
+      responses:
+        '200':
+          description: Rule deleted successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '404':
+          description: Rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '500':
+          description: Internal server error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+
+  /license-compatibility-rules/import:
+    post:
+      operationId: importLicenseCompatibilityRules
+      tags:
+        - License
+        - Admin
+      summary: Import license compatibility rules from a YAML file
+      description: >
+        Import the license compatibility rules from a YAML file. Rules already
+        present in the server are updated, the missing ones are created.
+      requestBody:
+        description: Include the YAML file
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                fileInput:
+                  type: string
+                  format: binary
+                  description: YAML to be imported
+              required:
+                - fileInput
+      responses:
+        '200':
+          description: Successfully imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '400':
+          description: Validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+
+  /license-compatibility-rules/export:
+    get:
+      operationId: exportLicenseCompatibilityRules
+      tags:
+        - License
+        - Admin
+      summary: Export the license compatibility rules as a YAML file
+      description: >
+        Export the license compatibility rules of the server as a YAML file.
+      parameters:
+        - name: id
+          description: Id of the rule to export, 0 for all
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Successfully exported
+          content:
+            text/x-yaml:
+              schema:
+                type: string
+                format: binary
+        '403':
+          description: Route is not accessible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        '404':
+          description: Rule not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+        default:
+          $ref: '#/components/responses/defaultResponse'
+
   /overview/database/contents:
     get:
       operationId: getDatabaseContents
@@ -5413,6 +5781,18 @@ components:
         ojoDecider:
           type: boolean
           description: Scanners matches if Ojo or REUSE.Software findings are no contradiction with other findings.
+        concludeLicenseType:
+          type: string
+          description: |
+            Auto conclude license if they are of provided type.
+            Omit the field or keep as empty string to not use this option.
+          example: Permissive
+        copyrightDeactivation:
+          type: boolean
+          description: Deactivate false positive copyrights (experimental).
+        copyrightClutterRemoval:
+          type: boolean
+          description: Deactivate false positive copyrights and remove clutter from them (experimental).
     ScanOptions:
       type: object
       properties:
@@ -5451,6 +5831,11 @@ components:
           default: false
           description: >
             Ignore SCM files (Git, SVN, TFS) and files with particular Mimetype
+        excludefolder:
+          type: boolean
+          default: false
+          description: >
+            Ignore Configured Folders from scanning. Admin->Customize->Exclude-Files 
         uploadType:
           type: string
           enum:
@@ -5751,6 +6136,9 @@ components:
         ecc:
           type: boolean
           description: Should ECC Analysis be run on this upload.
+        ipra:
+          type: boolean
+          description: Should IPRA Analysis be run on this upload.
         keyword:
           type: boolean
           description: Should keyword Analysis be run on this upload.
@@ -5766,21 +6154,28 @@ components:
         ojo:
           type: boolean
           description: Should OJO Analysis be run on this upload.
-        package:
+        pkgagent:
           type: boolean
           description: Should Package Analysis be run on this upload.
         reso:
           type: boolean
           description: Should REUSE.Software Analysis be run on this upload.
-        heritage:
+        softwareHeritage:
           type: boolean
           description: Should Software Heritage Analysis be run on this upload.
+        kotoba:
+          type: boolean
+          description: Should Kotoba Bulk Analysis be run on this upload.
     Reuser:
       type: object
       properties:
         reuseUpload:
-          type: integer
-          description: The UploadID to reuse.
+          oneOf:
+            - type: integer
+            - type: array
+              items:
+                type: integer
+          description: The UploadID(s) to reuse. Single integer or array of integers.
         reuseGroup:
           type: string
           description: The group of the reused upload
@@ -6663,6 +7058,144 @@ components:
           nullable: true
           example:
             "Please respect the obligation"
+    LicenseCompatibilityRule:
+      description: License compatibility rule information
+      type: object
+      properties:
+        id:
+          description: Id of the rule
+          type: integer
+          example:
+            4
+        firstLicenseId:
+          description: Id of the first license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            306
+        firstLicenseName:
+          description: Short name of the first license
+          type: string
+          nullable: true
+          example:
+            "MIT"
+        secondLicenseId:
+          description: Id of the second license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            188
+        secondLicenseName:
+          description: Short name of the second license
+          type: string
+          nullable: true
+          example:
+            "GPL-2.0-only"
+        firstType:
+          description: >
+            License type of the first license, null matches every type. Allowed
+            values are configured by the `LicenseTypes` setting of the server.
+          type: string
+          nullable: true
+          example:
+            "Permissive"
+        secondType:
+          description: License type of the second license, null matches every type
+          type: string
+          nullable: true
+          example:
+            "Strong Copyleft"
+        comment:
+          description: Description of the rule
+          type: string
+          example:
+            "A permissive license is compatible with a copyleft license"
+        compatibility:
+          description: Compatibility result of the rule
+          type: boolean
+          example:
+            true
+    NewLicenseCompatibilityRule:
+      description: New license compatibility rule
+      type: object
+      properties:
+        firstLicenseId:
+          description: Id of the first license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            306
+        secondLicenseId:
+          description: Id of the second license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            188
+        firstType:
+          description: License type of the first license, null matches every type
+          type: string
+          nullable: true
+          example:
+            "Permissive"
+        secondType:
+          description: License type of the second license, null matches every type
+          type: string
+          nullable: true
+          example:
+            "Strong Copyleft"
+        comment:
+          description: Description of the rule
+          type: string
+          example:
+            "A permissive license is compatible with a copyleft license"
+        compatibility:
+          description: Compatibility result of the rule
+          type: boolean
+          example:
+            true
+      required:
+        - comment
+        - compatibility
+    EditLicenseCompatibilityRule:
+      description: >
+        Values of a license compatibility rule to update. Only the fields sent
+        in the request body are updated, at least one is required.
+      type: object
+      properties:
+        firstLicenseId:
+          description: Id of the first license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            306
+        secondLicenseId:
+          description: Id of the second license, null matches every license
+          type: integer
+          nullable: true
+          example:
+            188
+        firstType:
+          description: License type of the first license, null matches every type
+          type: string
+          nullable: true
+          example:
+            "Permissive"
+        secondType:
+          description: License type of the second license, null matches every type
+          type: string
+          nullable: true
+          example:
+            "Strong Copyleft"
+        comment:
+          description: Description of the rule
+          type: string
+          example:
+            "A permissive license is compatible with a copyleft license"
+        compatibility:
+          description: Compatibility result of the rule
+          type: boolean
+          example:
+            true
     ApiInfo:
       description: Info about the API
       type: object
@@ -6725,6 +7258,16 @@ components:
               description: Date on which packages were built in ISO8601 format
               nullable: true
               example: "2022-01-07T11:13:00+05:30"
+    MaintenanceInfo:
+      description: Details about the last completed maintenance job
+      type: object
+      properties:
+        lastRun:
+          type: string
+          format: date-time
+          description: Timestamp of the most recently successfully completed maintenance job. Null if no maintenance job has completed successfully.
+          nullable: true
+          example: "2022-07-16T10:15:30+00:00"
     CreateMaintenance:
       description: Maintenance options
       type: object
@@ -6924,6 +7467,18 @@ components:
         hash:
           type: string
           description: MD5 hash of obligation text
+    UpdateGroup:
+      description: Group rename options
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          description: New name of the group
+          type: string
+          nullable: false
+          example:
+            "Main group"
     AddMember:
       description: UserMember options
       type: object

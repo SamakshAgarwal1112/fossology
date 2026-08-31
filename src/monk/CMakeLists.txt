@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-2.0-only
 SPDX-FileCopyrightText: © 2021 Avinal Kumar <avinal.xlvii@gmail.com>
 #]=======================================================================]
 
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(monk LANGUAGES C)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/SetDefaults.cmake)
@@ -15,13 +15,18 @@ install(DIRECTORY ui
     COMPONENT monk
     FILES_MATCHING
     PATTERN *.php
-    PATTERN "agent-monk-bulk.php" EXCLUDE)
+    PATTERN "agent-monk-bulk.php" EXCLUDE
+    PATTERN "agent-kotoba.php" EXCLUDE)
 
-install(FILES ui/agent-monk-bulk.php 
+install(FILES ui/agent-monk-bulk.php
     DESTINATION ${FO_MODDIR}/monkbulk/ui
     COMPONENT monkbulk)
 
-foreach(MONK_INSTALL monkbulk monk)
+install(FILES ui/agent-kotoba.php
+    DESTINATION ${FO_MODDIR}/kotoba/ui
+    COMPONENT kotoba)
+
+foreach(MONK_INSTALL monkbulk kotoba monk)
     set(PROJECT_NAME ${MONK_INSTALL})
     generate_version(${MONK_INSTALL} "VERSION-${MONK_INSTALL}")
     

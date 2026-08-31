@@ -21,6 +21,25 @@ use Fossology\UI\Api\Models\ApiVersion;
  */
 class DeciderTest extends \PHPUnit\Framework\TestCase
 {
+  ////// Constructor Tests //////
+
+  /**
+   * Tests that the Decider constructor initializes an instance correctly.
+   *
+   * @return void
+   */
+  public function testConstructor()
+  {
+    $decider = new Decider(
+      true,       
+      false,   
+      true,      
+      false,       
+      'GPL-3.0'    
+  );
+    $this->assertInstanceOf(Decider::class, $decider);
+  }
+
   /**
    * @test
    * -# Test for Decider::setUsingArray() when $version is V1
@@ -55,18 +74,22 @@ class DeciderTest extends \PHPUnit\Framework\TestCase
         "nomos_monk" => true,
         "bulk_reused" => false,
         "ojo_decider" => (1==1),
-        "conclude_license_type" => "   Permissive "
+        "conclude_license_type" => "   Permissive ",
+        "copyright_deactivation" => false,
+        "copyright_clutter_removal" => true
       ];
     } else {
       $deciderArray = [
         "nomosMonk" => true,
         "bulkReused" => false,
         "ojoDecider" => (1==1),
-        "concludeLicenseType" => "   Permissive "
+        "concludeLicenseType" => "   Permissive ",
+        "copyrightDeactivation" => false,
+        "copyrightClutterRemoval" => true
       ];
     }
 
-    $expectedObject = new Decider(true, false, false, true, "Permissive");
+    $expectedObject = new Decider(true, false, false, true, "Permissive", false, true);
 
     $actualObject = new Decider();
     $actualObject->setUsingArray($deciderArray, $version);
@@ -109,7 +132,9 @@ class DeciderTest extends \PHPUnit\Framework\TestCase
         "bulk_reused" => false,
         "new_scanner" => false,
         "ojo_decider" => true,
-        "conclude_license_type" => "Permissive"
+        "conclude_license_type" => "Permissive",
+        "copyright_deactivation" => false,
+        "copyright_clutter_removal" => false
       ];
     } else {
       $expectedArray = [
@@ -117,7 +142,9 @@ class DeciderTest extends \PHPUnit\Framework\TestCase
         "bulkReused" => false,
         "newScanner" => false,
         "ojoDecider" => true,
-        "concludeLicenseType" => "Permissive"
+        "concludeLicenseType" => "Permissive",
+        "copyrightDeactivation" => false,
+        "copyrightClutterRemoval" => false
       ];
     }
 

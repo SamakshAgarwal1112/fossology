@@ -25,31 +25,35 @@ $(document).ready(function () {
 
   $("#markDecisionAdd").click(function() {
     var decision = $("#markDecision").val();
+    $('#loader').show();
     return markDecisions(decision, false);
   });
 
   $("#markDecisionRemove").click(function() {
     var decision = $("#removeDecision").val();
+    $('#loader').show();
     return markDecisions(decision, true);
   });
 });
 
 $("#textModal").on('show.bs.modal', function (e) {
-    $("#bulkModal").modal("hide");
+    $("#bulkModal").hide();
 });
 
 $("#textModal").on('hide.bs.modal', function (e) {
-    $("#bulkModal").modal("show");
+    $("#bulkModal").show();
 });
 
 function openBulkModal(uploadTreeId) {
-  bulkModal = $('#bulkModal').modal('hide');
+  $('#bulkScope').val("f");
+  $('#bulkScope').attr("disabled", true);
   $('#uploadTreeId').val(uploadTreeId);
-  bulkModal.toggle();
+  $('#bulkModal').modal('show');
 }
 
 function closeBulkModal() {
-  $('#bulkModal').hide();
+  $('#editFilter').val(0);
+  $('#bulkModal').modal('hide');
 }
 
 // Hide backdrop for bulk modal
@@ -73,6 +77,7 @@ function openUserModal(uploadTreeId) {
 }
 
 function closeUserModal() {
+  $('#editFilter').val(0);
   userModal.modal('hide');
 }
 
@@ -92,6 +97,7 @@ function scheduleBulkScan() {
 }
 
 function performPostRequest(doRemove) {
+  $('#loader').show();
   removed = doRemove;
   performPostRequestCommon($('#bulkIdResult'), function () {
     location.reload();
@@ -102,6 +108,7 @@ function markDecisions(decisionToBeApplied, isRemoval) {
   if (isRemoval == true) {
     var pleaseConfirm = confirm("You are about to delete recent decisions. Please confirm!");
     if (pleaseConfirm == false) {
+      $('#loader').hide();
       return false;
     }
   }

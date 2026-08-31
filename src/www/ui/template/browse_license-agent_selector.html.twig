@@ -18,20 +18,22 @@
       </option>
     {% endfor %}
     </select>
-    <input type="submit" class="btn btn-default btn-sm" name="s" value="{{'Show'|trans}}"/>
+    <input type="submit" class="btn btn-light btn-sm" name="s" value="{{'Show'|trans}}"/>
   </form>
 {% endif %}
 
 {% for s in scanners %}
-  <div style="border: 1px dashed gray;">
-  {% include 'browse_license-agent.html.twig' with {
-     'agentName':s.agentName,
-     'successfulAgents':s.successfulAgents,
-     'uploadId':s.uploadId,
-     'agentName':s.agentName,
-     'isAgentRunning':s.isAgentRunning,
-     'currentAgentId':s.currentAgentId,
-     'currentAgentRev':s.currentAgentRev}
-  %}
-  </div>
+  {% if s.agentName != 'scancode' and s.agentName != 'reportImport' and s.agentName != 'spasht' %}
+    <div style="border: 1px dashed gray;">
+    {% include 'browse_license-agent.html.twig' with {
+      'agentName':s.agentName,
+      'successfulAgents':s.successfulAgents,
+      'uploadId':s.uploadId,
+      'agentName':s.agentName,
+      'isAgentRunning':s.isAgentRunning,
+      'currentAgentId':s.currentAgentId,
+      'currentAgentRev':s.currentAgentRev}
+    %}
+    </div>
+  {% endif %}
 {% endfor %}

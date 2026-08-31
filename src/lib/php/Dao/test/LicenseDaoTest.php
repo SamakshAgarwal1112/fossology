@@ -23,11 +23,15 @@ class LicenseDaoTest extends \PHPUnit\Framework\TestCase
   private $testDb;
   /** @var DbManager */
   private $dbManager;
+  /** @var LicenseDao */
+  private $licenseDao;
 
   protected function setUp() : void
   {
     $this->testDb = new TestPgDb();
+    $this->testDb->createPlainTables(array('obligation_ref','obligation_map','obligation_candidate_map'));
     $this->dbManager = $this->testDb->getDbManager();
+    $this->licenseDao = new LicenseDao($this->dbManager);
     $this->assertCountBefore = \Hamcrest\MatcherAssert::getCount();
   }
 
@@ -87,7 +91,6 @@ class LicenseDaoTest extends \PHPUnit\Framework\TestCase
     assertThat($matches[0], is(anInstanceOf(LicenseMatch::class)) );
     $this->addToAssertionCount(\Hamcrest\MatcherAssert::getCount()-$this->assertCountBefore);
   }
-
 
   public function testGetLicenseByShortName()
   {
@@ -384,6 +387,42 @@ class LicenseDaoTest extends \PHPUnit\Framework\TestCase
 
     assertThat($licDao->isNewLicense('(a new shortname)',$groupId), equalTo(TRUE));
     assertThat($licDao->isNewLicense('(a new shortname)',0), equalTo(TRUE));
+
+    $this->addToAssertionCount(\Hamcrest\MatcherAssert::getCount()-$this->assertCountBefore);
+  }
+
+  /**
+   * @test
+   * -# A candidate license belonging to another group must not leak into
+   *    getActiveLicensesForGroup() for a different group.
+   * -# The owning group must see its own candidate, prefixed with '*'.
+   * -# Plain (non-candidate) licenses must remain visible to every group.
+   */
+  public function testGetActiveLicensesForGroupScopesCandidatesByGroup()
+  {
+    $ownerGroupId = 401;
+    $otherGroupId = 402;
+    $this->setUpLicenseRefTable();
+    $this->testDb->insertData_license_ref();
+
+    $this->dbManager->queryOnce("CREATE TABLE license_candidate AS SELECT *,$ownerGroupId group_fk FROM license_ref LIMIT 1");
+    $licCandi = $this->dbManager->getSingleRow("SELECT * FROM license_candidate", array(), __METHOD__.'.candi');
+    $this->dbManager->queryOnce("DELETE FROM license_ref WHERE rf_pk=$licCandi[rf_pk]");
+    $this->dbManager->queryOnce("UPDATE license_candidate SET rf_shortname='CANDIDATE-SCOPE-TEST' WHERE rf_pk=$licCandi[rf_pk]");
+
+    $licRef = $this->dbManager->getSingleRow("SELECT * FROM license_ref LIMIT 1", array(), __METHOD__.'.ref');
+
+    $licDao = new LicenseDao($this->dbManager);
+
+    $ownerLicenses = $licDao->getActiveLicensesForGroup($ownerGroupId);
+    $otherLicenses = $licDao->getActiveLicensesForGroup($otherGroupId);
+
+    assertThat($ownerLicenses, hasValue('*CANDIDATE-SCOPE-TEST'));
+    assertThat($otherLicenses, not(hasValue('*CANDIDATE-SCOPE-TEST')));
+    assertThat($otherLicenses, not(hasValue('CANDIDATE-SCOPE-TEST')));
+
+    assertThat($ownerLicenses, hasValue($licRef['rf_shortname']));
+    assertThat($otherLicenses, hasValue($licRef['rf_shortname']));
 
     $this->addToAssertionCount(\Hamcrest\MatcherAssert::getCount()-$this->assertCountBefore);
   }

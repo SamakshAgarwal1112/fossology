@@ -2,6 +2,7 @@
 /*
  SPDX-FileCopyrightText: © 2017 Siemens AG
  SPDX-FileCopyrightText: © 2021 Orange by Piotr Pszczola <piotr.pszczola@orange.com>
+ SPDX-FileCopyrightText: © 2025 Tiyasa Kundu <tiyasakundu20@gmail.com>
 
  SPDX-License-Identifier: GPL-2.0-only
 */
@@ -15,6 +16,7 @@ namespace Fossology\UI\Api\Models;
 use Fossology\Lib\Auth\Auth;
 use Fossology\UI\Api\Exceptions\HttpForbiddenException;
 use Fossology\UI\Api\Exceptions\HttpNotFoundException;
+use Fossology\UI\Api\Models\ApiVersion;
 use Symfony\Component\HttpFoundation\Request;
 
 if (!class_exists("AgentAdder", false)) {
@@ -128,20 +130,55 @@ class ScanOptions
   private function prepareAgents(Request &$request)
   {
     $agentsToAdd = [];
-    foreach ($this->analysis->getArray() as $agent => $set) {
-      if ($set === true) {
-        if ($agent == "copyright_email_author") {
-          $agentsToAdd[] = "agent_copyright";
-          $request->request->set("Check_agent_copyright", 1);
-        } elseif ($agent == "patent") {
-          $agentsToAdd[] = "agent_ipra";
-          $request->request->set("Check_agent_ipra", 1);
-        } elseif ($agent == "package") {
-          $agentsToAdd[] = "agent_pkgagent";
-          $request->request->set("Check_agent_pkgagent", 1);
-        } else {
-          $agentsToAdd[] = "agent_$agent";
-          $request->request->set("Check_agent_$agent", 1);
+
+    $apiVersion = ApiVersion::getVersionFromUri();
+
+    if ($apiVersion == ApiVersion::V2) {
+      foreach ($this->analysis->getArray($apiVersion) as $agent => $set) {
+        if ($set === true) {
+          if ($agent == "copyrightEmailAuthor") {
+            $agentsToAdd[] = "agent_copyright";
+            $request->request->set("Check_agent_copyright", 1);
+          } elseif ($agent == "ipra") {
+            $agentsToAdd[] = "agent_ipra";
+            $request->request->set("Check_agent_ipra", 1);
+          } elseif ($agent == "pkgagent") {
+            $agentsToAdd[] = "agent_pkgagent";
+            $request->request->set("Check_agent_pkgagent", 1);
+          } elseif ($agent == "softwareHeritage") {
+            $agentsToAdd[] = "agent_shagent";
+            $request->request->set("Check_agent_shagent", 1);
+          } elseif ($agent == "kotoba") {
+            $agentsToAdd[] = "agent_kotoba";
+            $request->request->set("Check_agent_kotoba", 1);
+          } else {
+            $agentsToAdd[] = "agent_$agent";
+            $request->request->set("Check_agent_$agent", 1);
+          }
+        }
+      }
+    } else {
+      foreach ($this->analysis->getArray($apiVersion) as $agent => $set) {
+        if ($set === true) {
+          if ($agent == "copyright_email_author") {
+            $agentsToAdd[] = "agent_copyright";
+            $request->request->set("Check_agent_copyright", 1);
+          } elseif ($agent == "patent") {
+            $agentsToAdd[] = "agent_ipra";
+            $request->request->set("Check_agent_ipra", 1);
+          } elseif ($agent == "package") {
+            $agentsToAdd[] = "agent_pkgagent";
+            $request->request->set("Check_agent_pkgagent", 1);
+          } elseif ($agent == "heritage") {
+            $agentsToAdd[] = "agent_shagent";
+            $request->request->set("Check_agent_shagent", 1);
+          } elseif ($agent == "kotoba_bulk") {
+            $agentsToAdd[] = "agent_kotoba";
+            $request->request->set("Check_agent_kotoba", 1);
+          } else {
+            $agentsToAdd[] = "agent_$agent";
+            $request->request->set("Check_agent_$agent", 1);
+          }
         }
       }
     }
@@ -154,9 +191,17 @@ class ScanOptions
    */
   private function prepareReuser(Request &$request)
   {
-    if ($this->reuse->getReuseUpload() == 0) {
-      // No upload to reuse
+    $reuseUploads = $this->reuse->getReuseUploads();
+    $reuseUploads = array_filter($reuseUploads, function ($id) {
+      return $id > 0;
+    });
+    if (empty($reuseUploads)) {
       return;
+    }
+    foreach ($reuseUploads as $reuseUploadId) {
+      if (!$GLOBALS['container']->get("dao.upload")->isAccessible($reuseUploadId, Auth::getGroupId())) {
+        throw new HttpForbiddenException("Upload $reuseUploadId is not accessible for reuse");
+      }
     }
     $reuserRules = [];
     if ($this->reuse->getReuseMain() === true) {
@@ -172,8 +217,16 @@ class ScanOptions
       $reuserRules[] = 'reuseCopyright';
     }
     $userDao = $GLOBALS['container']->get("dao.user");
-    $reuserSelector = $this->reuse->getReuseUpload() . "," . $userDao->getGroupIdByName($this->reuse->getReuseGroup());
-    $request->request->set('uploadToReuse', $reuserSelector);
+    $groupId = $userDao->getGroupIdByName($this->reuse->getReuseGroup());
+    $reuserSelectors = [];
+    foreach ($reuseUploads as $uploadId) {
+      $reuserSelectors[] = $uploadId . "," . $groupId;
+    }
+    if (count($reuserSelectors) === 1) {
+      $request->request->set('uploadToReuse', $reuserSelectors[0]);
+    } else {
+      $request->request->set('uploadToReuse', $reuserSelectors);
+    }
     $request->request->set('reuseMode', $reuserRules);
   }
 
@@ -195,6 +248,12 @@ class ScanOptions
     }
     if ($this->decider->getOjoDecider() === true) {
       $deciderRules[] = 'ojoNoContradiction';
+    }
+    if ($this->decider->getCopyrightDeactivation() === true) {
+      $deciderRules[] = 'copyrightDeactivation';
+    }
+    if ($this->decider->getCopyrightClutterRemoval() === true) {
+      $deciderRules[] = 'copyrightDeactivationClutterRemoval';
     }
     if (! empty($this->decider->getConcludeLicenseType())) {
       $deciderRules[] = 'licenseTypeConc';

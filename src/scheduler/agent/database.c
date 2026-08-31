@@ -515,6 +515,7 @@ static void email_notification(scheduler_t* scheduler, job_t* job)
     final_cmd = get_email_command(scheduler, PQget(db_result, 0, "user_email"));
     if(final_cmd == NULL)
     {
+      job->status = curr_status;
       if(scheduler->parse_db_email != NULL)
         g_free(val);
       g_string_free(email_txt, TRUE);
@@ -640,7 +641,7 @@ typedef struct
 {
     char* table;        ///< The name of the table to check columns in
     uint8_t ncols;      ///< The number of columns in the table that the scheduler uses
-    char* columns[13];  ///< The columns that the scheduler uses for this table
+    char* columns[14];  ///< The columns that the scheduler uses for this table
 } reqcols;
 
 /**
@@ -670,10 +671,10 @@ static void check_tables(scheduler_t* scheduler)
    */
   reqcols cols[] =
   {
-      {"jobqueue",  13, {
-          "jq_args", "jq_end_bits", "jq_endtext", "jq_endtime", "jq_host",
-          "jq_itemsprocessed", "jq_job_fk", "jq_log", "jq_pk", "jq_runonpfile",
-          "jq_schedinfo", "jq_starttime", "jq_type"                                  }},
+      {"jobqueue",  14, {
+          "jq_args", "jq_cmd_args", "jq_end_bits", "jq_endtext", "jq_endtime",
+          "jq_host", "jq_itemsprocessed", "jq_job_fk", "jq_log", "jq_pk",
+          "jq_runonpfile", "jq_schedinfo", "jq_starttime", "jq_type"               }},
       {"sysconfig",      2, {"conf_value", "variablename"                            }},
       {"job",            2, {"job_pk",  "job_upload_fk"                              }},
       {"folder",         2, {"folder_name",  "folder_pk"                             }},
@@ -828,12 +829,43 @@ void database_exec_event(scheduler_t* scheduler, char* sql)
 {
   PGresult* db_result = database_exec(scheduler, sql);
   if(PQresultStatus(db_result) != PGRES_COMMAND_OK)
+  {
     PQ_ERROR(db_result, "failed to perform database exec: %s", sql);
+  }
+  else
+    SafePQclear(db_result);
   g_free(sql);
 }
 
 /**
+ * @brief GTraverseFunc callback: append each job's id (jq_pk) to a
+ *        comma-separated GString for use in a SQL NOT IN clause.
+ *
+ * Called by g_tree_foreach() on scheduler->job_list inside
+ * database_update_event() to build the exclusion list that prevents
+ * in-flight JB_CHECKEDOUT jobs (whose jq_starttime is still NULL in the
+ * database) from being re-fetched and consuming LIMIT slots.
+ *
+ * @param key   Pointer to the job id (int*) stored as the GTree key
+ * @param val   Unused job_t* value
+ * @param data  GString* to append to
+ * @return FALSE to continue the traversal
+ */
+static gboolean collect_known_pks(gpointer key, gpointer val, gpointer data)
+{
+  (void)val;
+  g_string_append_printf((GString*)data, ",%d", *(int*)key);
+  return FALSE;
+}
+
+/**
  * @brief Checks the job queue for any new entries.
+ *
+ * The number of rows fetched from the database is bounded by the sum of
+ * max-agent slots across all configured hosts so that every available slot
+ * can be filled in a single poll cycle.  When the scheduler has not yet
+ * loaded any host configuration (startup path) the query falls back to
+ * CHECKOUT_SIZE as a safe upper bound.
  *
  * @param scheduler The scheduler_t* that holds the connection
  * @param unused
@@ -842,11 +874,13 @@ void database_update_event(scheduler_t* scheduler, void* unused)
 {
   /* locals */
   PGresult* db_result;
-  PGresult* pri_result;
   int i, j_id;
-  char sql[512];
-  char* value, * type, * host, * pfile, * parent, *jq_cmd_args;
+  char* value, * type, * host, * pfile, * jq_cmd_args;
   job_t* job;
+  gchar* checkout_sql;
+  int   checkout_limit;
+  GString* excl_pks;
+  GList* iter;
 
   if(closing)
   {
@@ -854,11 +888,55 @@ void database_update_event(scheduler_t* scheduler, void* unused)
     return;
   }
 
-  /* make the database query */
-  db_result = database_exec(scheduler, basic_checkout);
+  /* Compute the checkout limit from configured host capacity.
+   *  a) No hosts loaded yet (startup): fall back to CHECKOUT_SIZE.
+   *  b) Hosts configured: sum max values for hosts with max > 0 only
+   *     (max <= 0 provides no real slots per get_host() and must not reduce
+   *     the total). LIMIT 0 is valid SQL and correct when all hosts have
+   *     max=0; do NOT inflate to CHECKOUT_SIZE or jobs that can never run
+   *     would be over-fetched. On integer overflow (requires INT_MAX
+   *     slots – practically impossible) fall back to CHECKOUT_SIZE. */
+  if(scheduler->host_queue == NULL)
+  {
+    checkout_limit = CHECKOUT_SIZE;
+  }
+  else
+  {
+    gint64 limit64 = 0;
+    for(iter = scheduler->host_queue; iter != NULL; iter = iter->next)
+    {
+      int host_max = ((host_t*)iter->data)->max;
+      /* Only count hosts that can actually accept agents */
+      if(host_max > 0)
+        limit64 += host_max;
+    }
+    /* Accumulating positive ints into gint64 cannot overflow in practice,
+     * but guard the cast back to int to avoid UB (requires >2^31 total slots). */
+    checkout_limit = (limit64 <= INT_MAX) ? (int)limit64 : CHECKOUT_SIZE;
+  }
+
+  /* Exclude in-memory jobs from the poll: JB_CHECKEDOUT jobs have
+   * jq_starttime NULL in the DB until the agent handshake completes, so
+   * basic_checkout would otherwise re-fetch them and waste LIMIT slots.
+   * Sentinel 0 keeps the list non-empty when job_list is empty. */
+  excl_pks = g_string_new("0");
+  g_tree_foreach(scheduler->job_list, collect_known_pks, excl_pks);
+
+  /* one query for the queue rows joined with priority and user info, instead of
+   * a basic_checkout plus a per-row jobsql_information lookup */
+  checkout_sql = g_strdup_printf(basic_checkout, excl_pks->str, checkout_limit);
+  g_string_free(excl_pks, TRUE);
+  db_result = database_exec(scheduler, checkout_sql);
+  g_free(checkout_sql);
+  if(db_result == NULL)
+  {
+    ERROR("database update: database_exec returned NULL (connection failure)");
+    return;
+  }
   if(PQresultStatus(db_result) != PGRES_TUPLES_OK)
   {
     PQ_ERROR(db_result, "database update failed on call to PQexec");
+    SafePQclear(db_result);
     return;
   }
 
@@ -866,18 +944,25 @@ void database_update_event(scheduler_t* scheduler, void* unused)
       PQntuples(db_result));
   for(i = 0; i < PQntuples(db_result); i++)
   {
-    /* start by checking that the job hasn't already been grabbed */
+    /* skip jobs already held in memory */
     j_id = atoi(PQget(db_result, i, "jq_pk"));
     if(g_tree_lookup(scheduler->job_list, &j_id) != NULL)
       continue;
 
-    /* get relevant values out of the job queue */
-    parent =      PQget(db_result, i, "jq_job_fk");
-    host   =      PQget(db_result, i, "jq_host");
-    type   =      PQget(db_result, i, "jq_type");
-    pfile  =      PQget(db_result, i, "jq_runonpfile");
-    value  =      PQget(db_result, i, "jq_args");
-    jq_cmd_args  =PQget(db_result, i, "jq_cmd_args");
+    /* the LEFT JOIN gives an empty user_pk for a job whose user was deleted */
+    if(PQget(db_result, i, "user_pk")[0] == '\0')
+    {
+      WARNING("DB: jq_pk[%d] references a non-existent user"
+          " (job_user_fk not found in users table) - skipping orphaned job",
+          j_id);
+      continue;
+    }
+
+    host        = PQget(db_result, i, "jq_host");
+    type        = PQget(db_result, i, "jq_type");
+    pfile       = PQget(db_result, i, "jq_runonpfile");
+    value       = PQget(db_result, i, "jq_args");
+    jq_cmd_args = PQget(db_result, i, "jq_cmd_args");
 
     if(host != NULL)
       host = (strlen(host) == 0) ? NULL : host;
@@ -888,7 +973,6 @@ void database_update_event(scheduler_t* scheduler, void* unused)
         "jq_runonpfile = %d\n   jq_args = %s\n  jq_cmd_args = %s\n",
         j_id, type, host, (pfile != NULL && pfile[0] != '\0'), value, jq_cmd_args);
 
-    /* check if this is a command */
     if(strcmp(type, "command") == 0)
     {
       WARNING("DB: commands in the job queue not implemented,"
@@ -896,27 +980,14 @@ void database_update_event(scheduler_t* scheduler, void* unused)
       continue;
     }
 
-    sprintf(sql, jobsql_information, parent);
-    pri_result = database_exec(scheduler, sql);
-    if(PQresultStatus(pri_result) != PGRES_TUPLES_OK)
-    {
-      PQ_ERROR(pri_result, "database update failed on call to PQexec");
-      continue;
-    }
-    if(PQntuples(pri_result)==0)
-    {
-      WARNING("can not find the user information of job_pk %s\n", parent);
-      SafePQclear(pri_result);
-      continue;
-    }
+    /* user_pk, group_pk and job_priority come from the merged query. */
     job = job_init(scheduler->job_list, scheduler->job_queue, type, host, j_id,
-        atoi(parent),
-        atoi(PQget(pri_result, 0, "user_pk")),
-        atoi(PQget(pri_result, 0, "group_pk")),
-        atoi(PQget(pri_result, 0, "job_priority")), jq_cmd_args);
-    job_set_data(scheduler, job,  value, (pfile && pfile[0] != '\0'));
-
-    SafePQclear(pri_result);
+        atoi(PQget(db_result, i, "jq_job_fk")),
+        atoi(PQget(db_result, i, "user_pk")),
+        atoi(PQget(db_result, i, "group_pk")),
+        atoi(PQget(db_result, i, "job_priority")),
+        jq_cmd_args);
+    job_set_data(scheduler, job, value, (pfile && pfile[0] != '\0'));
   }
 
   SafePQclear(db_result);
@@ -932,7 +1003,11 @@ void database_reset_queue(scheduler_t* scheduler)
 {
   PGresult* db_result = database_exec(scheduler, jobsql_resetqueue);
   if(PQresultStatus(db_result) != PGRES_COMMAND_OK)
+  {
     PQ_ERROR(db_result, "failed to reset job queue");
+  }
+  else
+    SafePQclear(db_result);
 }
 
 /**
@@ -973,14 +1048,36 @@ void database_update_job(scheduler_t* scheduler, job_t* job, job_status status)
   }
 
   /* update the database job queue */
-  db_result = database_exec(scheduler, sql);
-  if(sql != NULL && PQresultStatus(db_result) != PGRES_COMMAND_OK)
-    PQ_ERROR(db_result, "failed to update job status in job queue");
+  if(sql != NULL)
+  {
+    db_result = database_exec(scheduler, sql);
+    if(PQresultStatus(db_result) != PGRES_COMMAND_OK)
+    {
+      PQ_ERROR(db_result, "failed to update job status in job queue");
+    }
+    else
+      SafePQclear(db_result);
+    g_free(sql);
+  }
+
+  /* A failed prerequisite (e.g. a failed wget_agent) must fail its dependent
+   * queue entries (ununpack, adj2nest, ...) too, instead of leaving them stuck
+   * in the queue forever. Only real jobs (j_id >= 0) can have dependents. */
+  if(status == JB_FAILED && j_id >= 0)
+  {
+    gchar* dep_sql = g_strdup_printf(jobsql_fail_dependents, j_id);
+    db_result = database_exec(scheduler, dep_sql);
+    if(PQresultStatus(db_result) != PGRES_COMMAND_OK)
+    {
+      PQ_ERROR(db_result, "failed to fail dependent jobs for jq_pk %d", j_id);
+    }
+    else
+      SafePQclear(db_result);
+    g_free(dep_sql);
+  }
 
   if(status == JB_COMPLETE || status == JB_FAILED)
     email_notification(scheduler, job);
-
-  g_free(sql);
 }
 
 /**
@@ -1025,9 +1122,12 @@ void database_job_priority(scheduler_t* scheduler, job_t* job, int priority)
 
   sql = g_strdup_printf(jobsql_priority, priority, job->id);
   db_result = database_exec(scheduler, sql);
-  if(sql != NULL && PQresultStatus(db_result) != PGRES_COMMAND_OK)
+  if(PQresultStatus(db_result) != PGRES_COMMAND_OK)
+  {
     PQ_ERROR(db_result, "failed to change job queue entry priority");
-
+  }
+  else
+    SafePQclear(db_result);
   g_free(sql);
 }
 
@@ -1183,8 +1283,12 @@ char* get_email_command(scheduler_t* scheduler, char* user_email)
   }
   else
   {
-    NOTIFY("Unable to send email. SMTP host or port not found in the configuration.\n"
-        "Please check Configuration Variables.");
+    // only warn if the admin actually configured SMTP (SMTPHostName is set)
+    if (g_hash_table_contains(smtpvariables, "SMTPHostName"))
+    {
+      NOTIFY("Unable to send email. SMTP host or port not found in the configuration.\n"
+          "Please check Configuration Variables.");
+    }
     final_command = NULL;
   }
   g_hash_table_destroy(smtpvariables);

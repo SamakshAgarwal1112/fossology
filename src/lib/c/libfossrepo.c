@@ -333,7 +333,7 @@ char* fo_RepMkPathTmp(const char* Type, char* Filename, char* Ext, int Which)
   {
     strcat(Path, ".");
     strcat(Path, Ext);
-    Len += strlen(Type) + 1;
+    Len += strlen(Ext) + 1;
   }
   return (Path);
 } /* fo_RepMkPathTmp() */
@@ -873,7 +873,11 @@ int fo_RepImport(char* Source, char* Type, char* Filename, int Link)
       {
         /*** Oh no!  Write failed! ***/
         fclose(Fout);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuse-after-free"
+        // Used to close the pointer :-)
         fo_RepFclose(Fout);
+#pragma GCC diagnostic pop
         fo_RepRemove(Type,Filename);
         fprintf(stderr,"ERROR: Write failed -- type='%s' filename='%s'\n",Type,Filename);
         fclose(Fin);

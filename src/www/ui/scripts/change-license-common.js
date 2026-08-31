@@ -82,9 +82,14 @@ function selectNoLicenseFound(left, right) {
 function scheduledDeciderSuccess (data, resultEntity, callbackSuccess, callbackCloseModal) {
   var jqPk = data.jqid;
   if (jqPk) {
-    resultEntity.html("scan scheduled as " + linkToJob(jqPk));
+    var jqPks = Array.isArray(jqPk) ? jqPk : [jqPk];
+    resultEntity.html("scan scheduled as " + jqPks.map(linkToJob).join(', '));
     if (callbackSuccess) {
-      queueUpdateCheck(jqPk, callbackSuccess);
+      jqPks.forEach(function(pk) {
+        queueUpdateCheck(pk, callbackSuccess, function() {
+          resultEntity.html("job failed (see " + linkToJob(pk) + ")");
+        });
+      });
     }
     callbackCloseModal();
   } else {
@@ -147,7 +152,8 @@ function scheduleBulkScanCommon(resultEntity, callbackSuccess) {
     "forceDecision": $('#forceDecision').is(':checked')?1:0,
     "scanOnlyFindings": $('#scanOnlyFindings').is(':checked') ? 1 : 0,
     "ignoreIrre": $('#bulkIgnoreIrre').is(':checked') ? 1 : 0,
-    "delimiters": $("#delimdrop").val()
+    "delimiters": $("#delimdrop").val(),
+    "addToCustomPhrase": $('#addToCustomPhrase').is(':checked') ? 1 : 0
   };
 
   resultEntity.hide();
@@ -178,7 +184,7 @@ function performPostRequestCommon(resultEntity, callbackSuccess) {
     type: "POST",
     url: "?mod=change-license-processPost",
     data: data,
-    success: function (data) { scheduledBootstrapSuccess(data, resultEntity, callbackSuccess, closeUserModal); },
+    success: function (data) { scheduledBootstrapSuccess(data, resultEntity, callbackSuccess); },
     error: function(responseobject) { bootstrapAlertError(responseobject, resultEntity); }
   });
 
@@ -246,15 +252,20 @@ function openTextModel(uploadTreeId, licenseId, what, type) {
     type = 0;
   }
 
+  var titleMap = {
+    2: 'License Text', 'reportinfo': 'License Text',
+    3: 'Acknowledgement', 'acknowledgement': 'Acknowledgement',
+    4: 'Comment', 'comment': 'Comment'
+  };
+  $('#textModal .modal-title').text(titleMap[what] || 'Enter Content');
+
   if (what == 3 || what === 'acknowledgement') {
-    // clicked to add button to display child modal
     $('#selectFromNoticeFile').css('display','inline-block');
   } else {
     $('#selectFromNoticeFile').css('display','none');
   }
 
   if (what == 2 || what === 'reportinfo') {
-    // clicked to add button to display child modal
     $('#clearText').show();
   } else {
     $('#clearText').hide();
@@ -300,6 +311,7 @@ function openTextModel(uploadTreeId, licenseId, what, type) {
 }
 
 function closeTextModal() {
+  if (document.activeElement) document.activeElement.blur();
   textModal.modal('hide');
 }
 
@@ -354,6 +366,7 @@ function selectNoticeFile() {
 }
 
 function submitTextModal(){
+  if (document.activeElement) document.activeElement.blur();
   var refTextId = "#referenceText"
   var ConcludeLicenseUrl = "?mod=conclude-license&do=updateClearings";
   if(whatType == 0) {
@@ -370,12 +383,12 @@ function submitTextModal(){
     });
   } else {
     textModal.modal('hide');
-    $("#"+ whatLicId + whatCol +"Bulk").attr('title', $(refTextId).val());
-    referenceText = $(refTextId).val().trim();
-    if(referenceText !== null && referenceText !== '') {
-      $("#"+ whatLicId + whatCol + whatType).html($("#"+ whatLicId + whatCol + whatType).attr('title').slice(0, 10) + "...");
+    var enteredText = $(refTextId).val();
+    if (typeof setBulkLicenseText === 'function') {
+      setBulkLicenseText(whatLicId, whatCol, enteredText);
     } else {
-      $("#"+ whatLicId + whatCol +"Bulk").attr('title','');
+      var displayText = enteredText.trim() !== '' ? enteredText.slice(0, 10) + "..." : 'Click to add';
+      $("#"+ whatLicId + whatCol +"Bulk").attr('title', enteredText).html(displayText);
     }
   }
 }
@@ -406,7 +419,7 @@ function openAckInputModal(){
 }
 
 function closeAckInputModal(){
-  $('#textAckInputModal').modal('show');
+  $('#textAckInputModal').modal('hide');
 }
 
 function doOnSuccess(textModal) {
@@ -453,7 +466,6 @@ $(document).ready(function () {
 function createDropDown(element, textBox) {
   let dropDown = null;
   if ($("#licenseStdCommentDropDown").length) {
-    // The dropdown already exists
     $("#licenseStdCommentDropDown-text").show();
     dropDown = $("#licenseStdCommentDropDown");
     dropDown.val(null).trigger('change');
@@ -517,7 +529,6 @@ function getStdLicenseComments(scope, callback) {
 function createAcknowledgementDropDown(element, textBox) {
   let dropDown = null;
   if ($("#licenseAcknowledgementDropDown").length) {
-    // The dropdown already exists
     $("#licenseAcknowledgementDropDown-text").show();
     dropDown = $("#licenseAcknowledgementDropDown");
     dropDown.val(null).trigger('change');
@@ -597,17 +608,24 @@ function bootstrapAlertError(responseobject, resultEntity) {
   resultEntity.show();
 }
 
-function scheduledBootstrapSuccess (data, resultEntity, callbackSuccess, callbackCloseModal) {
+function scheduledBootstrapSuccess (data, resultEntity, callbackSuccess) {
   var jqPk = data.jqid;
   var errorSpan = resultEntity.find("span:first");
   if (jqPk) {
+    resultEntity.removeClass("alert-danger").addClass("alert-success");
     errorSpan.html("scan scheduled as " + linkToJob(jqPk));
     if (callbackSuccess) {
       resultEntity.show();
-      queueUpdateCheck(jqPk, callbackSuccess);
+      queueUpdateCheck(jqPk, callbackSuccess, function() {
+        resultEntity.removeClass("alert-success").addClass("alert-danger");
+        errorSpan.text("job failed (see ");
+        errorSpan.append(linkToJob(jqPk));
+        errorSpan.append(")");
+        resultEntity.show();
+      });
     }
-    callbackCloseModal();
   } else {
+    resultEntity.removeClass("alert-success").addClass("alert-danger");
     errorSpan.text("bad response from server");
   }
   resultEntity.show();

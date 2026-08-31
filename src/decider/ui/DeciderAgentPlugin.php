@@ -43,8 +43,7 @@ class DeciderAgentPlugin extends AgentPlugin
     if ($ninkaUi=plugin_find('agent_ninka')) {
       $vars['isNinkaInstalled'] = $ninkaUi->isNinkaInstalled();
     }
-    $vars['isSpacyInstalled'] = file_exists("/home/" .
-      $SysConf['DIRECTORIES']['PROJECTUSER'] . "/pythondeps/bin/spacy");
+    $vars['isSpacyInstalled'] = $this->isSpacyInstalled();
     $licenseTypes = array_map('trim', explode(',',
         $SysConf['SYSCONFIG']['LicenseTypes']));
     $vars['licenseTypes'] = array_combine($licenseTypes, $licenseTypes);
@@ -57,6 +56,11 @@ class DeciderAgentPlugin extends AgentPlugin
    * @return string Footer HTML
    */
   public function renderFoot(&$vars)
+  {
+    return "";
+  }
+
+  public function getScriptIncludes(&$vars)
   {
     return "";
   }
@@ -74,7 +78,13 @@ class DeciderAgentPlugin extends AgentPlugin
     $dependencies = array();
 
     $rules = $request->get('deciderRules', []);
+    if (!is_array($rules)) {
+      $rules = [];
+    }
     $agents = $request->get('agents', []);
+    if (!is_array($agents)) {
+      $agents = [];
+    }
     if (in_array('agent_nomos', $agents)) {
       $checkAgentNomos = true;
     } else {
@@ -134,11 +144,28 @@ class DeciderAgentPlugin extends AgentPlugin
           $dependencies[] = 'agent_compatibility';
           $rulebits |= 0x80;
           break;
+        case 'kotobaAgent':
+          $rulebits |= 0x100;
+          break;
       }
     }
 
     if (empty($rulebits)) {
       return 0;
+    }
+
+    // If only kotobaAgent is selected, schedule kotoba_bulk agent directly without scheduling decider
+    if ($rulebits == 0x100) {
+      $kotobaPlugin = \plugin_find("agent_kotoba");
+      if ($kotobaPlugin !== null) {
+        return $kotobaPlugin->AgentAdd($jobId, $uploadId, $errorMsg, array(), null, $request);
+      }
+      return 0;
+    }
+
+    // If kotobaAgent is selected along with other rules, add kotoba_bulk as dependency
+    if ($rulebits & 0x100) {
+      $dependencies[] = 'agent_kotoba';
     }
 
     $args = self::RULES_FLAG . $rulebits;
@@ -162,6 +189,9 @@ class DeciderAgentPlugin extends AgentPlugin
   protected function addScannerDependencies(&$dependencies, Request $request)
   {
     $agentList = $request->get('agents') ?: array();
+    if (!is_array($agentList)) {
+      $agentList = array();
+    }
     foreach (array('agent_nomos', 'agent_monk', 'agent_ninka') as $agentName) {
       if (in_array($agentName, $dependencies)) {
         continue;
@@ -195,11 +225,26 @@ class DeciderAgentPlugin extends AgentPlugin
     global $SysConf;
     $licenseTypes = array_map('trim', explode(',',
         $SysConf['SYSCONFIG']['LicenseTypes']));
-    $licenseType = trim($request->get("licenseTypeConc", ""));
+    $licenseType = $request->get("licenseTypeConc", "");
+    if (!is_string($licenseType)) {
+      return "";
+    }
+    $licenseType = trim($licenseType);
     if (in_array($licenseType, $licenseTypes)) {
       return $licenseType;
     }
     return "";
+  }
+
+  /**
+   * Check if spacy is installed?
+   * @return bool True if installed, false otherwise
+   */
+  public function isSpacyInstalled()
+  {
+    global $SysConf;
+    return file_exists("/home/" .
+      $SysConf['DIRECTORIES']['PROJECTUSER'] . "/pythondeps/bin/spacy");
   }
 }
 

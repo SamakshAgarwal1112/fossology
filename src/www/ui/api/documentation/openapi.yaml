@@ -3231,6 +3231,25 @@ paths:
             type: integer
             minimum: 1
           in: header
+        - name: sort
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+          in: query
+        - name: status
+          description: Returns only jobs with the selected status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - Processing
+              - Queued
+              - Completed
+              - Failed
+          in: query
         - name: upload
           required: false
           schema:
@@ -3308,6 +3327,25 @@ paths:
             type: integer
             minimum: 1
           in: header
+        - name: status
+          description: Returns only jobs with the selected status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - Processing
+              - Queued
+              - Completed
+              - Failed
+          in: query
+        - name: sort
+          required: false
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+          in: query
       responses:
         '200':
           description: OK
@@ -4382,10 +4420,15 @@ paths:
               - dep5
               - spdx2
               - spdx2tv
+              - spdx2csv
               - readmeoss
               - unifiedreport
               - clixml
               - cyclonedx
+              - spdx3json
+              - spdx3rdf
+              - spdx3jsonld
+              - spdx3tv
         - name: groupName
           description: The group name to chose while generating a report
           in: header
@@ -5531,6 +5574,12 @@ components:
             Auto conclude license if they are of provided type.
             Omit the field or keep as empty string to not use this option.
           example: Permissive
+        copyright_deactivation:
+          type: boolean
+          description: Deactivate false positive copyrights (experimental).
+        copyright_clutter_removal:
+          type: boolean
+          description: Deactivate false positive copyrights and remove clutter from them (experimental).
     ScanOptions:
       type: object
       properties:
@@ -5823,6 +5872,9 @@ components:
         ecc:
           type: boolean
           description: Should ECC Analysis be run on this upload.
+        patent:
+          type: boolean
+          description: Should IPRA Analysis be run on this upload.
         keyword:
           type: boolean
           description: Should keyword Analysis be run on this upload.
@@ -5850,12 +5902,19 @@ components:
         compatibility:
           type: boolean
           description: Should Compatibility Analysis be run on this upload.
+        kotoba_bulk:
+          type: boolean
+          description: Should Kotoba Bulk Analysis be run on this upload.
     Reuser:
       type: object
       properties:
         reuse_upload:
-          type: integer
-          description: The UploadID to reuse.
+          oneOf:
+            - type: integer
+            - type: array
+              items:
+                type: integer
+          description: The UploadID(s) to reuse. Single integer or array of integers.
         reuse_group:
           type: string
           description: The group of the reused upload

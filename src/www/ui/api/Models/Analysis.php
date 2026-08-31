@@ -60,6 +60,11 @@ class Analysis
    */
   private $ojo;
   /**
+   * @var boolean $scanoss
+   * Whether to schedule scanoss agent or not
+   */
+  private $scanoss;
+  /**
    * @var boolean $pkgagent
    * Whether to schedule reso agent or not
    */
@@ -70,10 +75,25 @@ class Analysis
    */
   private $pkgagent;
   /**
+   * @var boolean $ipra
+   * Whether to schedule ipra agent or not
+   */
+  private $ipra;
+  /**
+   * @var boolean $softwareHeritage
+   * Whether to schedule software heritage agent or not
+   */
+  private $softwareHeritage;
+  /**
    * @var boolean $compatibility
    * Whether to schedule compatibility agent or not
    */
   private $compatibility;
+  /**
+   * @var boolean $kotoba
+   * Whether to schedule kotoba agent or not
+   */
+  private $kotoba;
 
   /**
    * Analysis constructor.
@@ -87,11 +107,14 @@ class Analysis
    * @param boolean $pkgagent
    * @param boolean $ojo
    * @param boolean $reso
-   * @param boolean $pkgagent
    * @param boolean $compatibility
+   * @param boolean $scanoss
+   * @param boolean $ipra
+   * @param boolean $softwareHeritage
+   * @param boolean $kotoba
    */
   public function __construct($bucket = false, $copyright = false, $ecc = false, $keyword = false,
-    $mimetype = false, $monk = false, $nomos = false, $ojo = false, $reso = false, $pkgagent = false, $compatibility = false)
+    $mimetype = false, $monk = false, $nomos = false, $ojo = false, $reso = false, $pkgagent = false, $compatibility = false, $scanoss = false, $ipra = false, $softwareHeritage = false, $kotoba = false)
   {
     $this->bucket = $bucket;
     $this->copyright = $copyright;
@@ -101,9 +124,27 @@ class Analysis
     $this->monk = $monk;
     $this->nomos = $nomos;
     $this->ojo = $ojo;
+    $this->scanoss = $scanoss;
     $this->reso = $reso;
     $this->pkgagent = $pkgagent;
+    $this->ipra = $ipra;
+    $this->softwareHeritage = $softwareHeritage;
     $this->compatibility = $compatibility;
+    $this->kotoba = $kotoba;
+  }
+
+  /**
+   * Helper function to set boolean properties from array
+   * @param array $array Source array containing boolean values
+   * @param array $propertyMap Map of array keys to object properties
+   */
+  private function setBooleanProperties($array, $propertyMap)
+  {
+    foreach ($propertyMap as $key => $property) {
+      if (array_key_exists($key, $array)) {
+        $this->$property = filter_var($array[$key], FILTER_VALIDATE_BOOLEAN);
+      }
+    }
   }
 
   /**
@@ -113,45 +154,25 @@ class Analysis
    */
   public function setUsingArray($analysisArray, $version = ApiVersion::V1)
   {
-    if (array_key_exists("bucket", $analysisArray)) {
-      $this->bucket = filter_var($analysisArray["bucket"],
-        FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists(($version == ApiVersion::V2? "copyrightEmailAuthor" : "copyright_email_author"), $analysisArray)) {
-      $this->copyright = filter_var($analysisArray[$version == ApiVersion::V2? "copyrightEmailAuthor" : "copyright_email_author"],
-        FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("ecc", $analysisArray)) {
-      $this->ecc = filter_var($analysisArray["ecc"], FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("keyword", $analysisArray)) {
-      $this->keyword = filter_var($analysisArray["keyword"],
-        FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("mime", $analysisArray)) {
-      $this->mimetype = filter_var($analysisArray["mime"],
-        FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("monk", $analysisArray)) {
-      $this->monk = filter_var($analysisArray["monk"], FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("nomos", $analysisArray)) {
-      $this->nomos = filter_var($analysisArray["nomos"], FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("ojo", $analysisArray)) {
-      $this->ojo = filter_var($analysisArray["ojo"], FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("reso", $analysisArray)) {
-      $this->reso = filter_var($analysisArray["reso"], FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("package", $analysisArray)) {
-      $this->pkgagent = filter_var($analysisArray["package"],
-        FILTER_VALIDATE_BOOLEAN);
-    }
-    if (array_key_exists("compatibility", $analysisArray)) {
-      $this->compatibility = filter_var($analysisArray["compatibility"],
-          FILTER_VALIDATE_BOOLEAN);
-    }
+    $propertyMap = [
+      'bucket' => 'bucket',
+      ($version == ApiVersion::V2 ? 'copyrightEmailAuthor' : 'copyright_email_author') => 'copyright',
+      'ecc' => 'ecc',
+      'keyword' => 'keyword',
+      'mime' => 'mimetype',
+      'monk' => 'monk',
+      'nomos' => 'nomos',
+      'ojo' => 'ojo',
+      'scanoss' => 'scanoss',
+      'reso' => 'reso',
+      ($version == ApiVersion::V2 ? "pkgagent" : "package") => 'pkgagent',
+      ($version == ApiVersion::V2 ? 'ipra' : 'patent') => 'ipra',
+      ($version == ApiVersion::V2 ? 'softwareHeritage' : "heritage") => 'softwareHeritage',
+      'compatibility' => 'compatibility',
+      ($version == ApiVersion::V2 ? 'kotoba' : 'kotoba_bulk') => 'kotoba'
+    ];
+
+    $this->setBooleanProperties($analysisArray, $propertyMap);
     return $this;
   }
 
@@ -162,38 +183,28 @@ class Analysis
    */
   public function setUsingString($analysisString)
   {
-    if (stristr($analysisString, "bucket")) {
-      $this->bucket = true;
-    }
-    if (stristr($analysisString, "copyright")) {
-      $this->copyright = true;
-    }
-    if (stristr($analysisString, "ecc")) {
-      $this->ecc = true;
-    }
-    if (stristr($analysisString, "keyword")) {
-      $this->keyword = true;
-    }
-    if (stristr($analysisString, "mimetype")) {
-      $this->mimetype = true;
-    }
-    if (stristr($analysisString, "monk")) {
-      $this->monk = true;
-    }
-    if (stristr($analysisString, "nomos")) {
-      $this->nomos = true;
-    }
-    if (stristr($analysisString, "ojo")) {
-      $this->ojo = true;
-    }
-    if (stristr($analysisString, "reso")) {
-      $this->reso = true;
-    }
-    if (stristr($analysisString, "pkgagent")) {
-      $this->pkgagent = true;
-    }
-    if (stristr($analysisString, "compatibility")) {
-      $this->compatibility = true;
+    $propertyMap = [
+      'bucket' => 'bucket',
+      'copyright' => 'copyright',
+      'ecc' => 'ecc',
+      'keyword' => 'keyword',
+      'mimetype' => 'mimetype',
+      'monk' => 'monk',
+      'nomos' => 'nomos',
+      'ojo' => 'ojo',
+      'scanoss' => 'scanoss',
+      'reso' => 'reso',
+      'pkgagent' => 'pkgagent',
+      'ipra' => 'ipra',
+      'softwareHeritage' => 'softwareHeritage',
+      'compatibility' => 'compatibility',
+      'kotoba' => 'kotoba'
+    ];
+
+    foreach ($propertyMap as $key => $property) {
+      if (stristr($analysisString, $key)) {
+        $this->$property = true;
+      }
     }
     return $this;
   }
@@ -266,6 +277,14 @@ class Analysis
   /**
    * @return boolean
    */
+  public function getScanoss()
+  {
+    return $this->scanoss;
+  }
+
+  /**
+   * @return boolean
+   */
   public function getReso()
   {
     return $this->reso;
@@ -274,9 +293,25 @@ class Analysis
   /**
    * @return boolean
    */
-  public function getPackage()
+  public function getPkgagent()
   {
     return $this->pkgagent;
+  }
+
+  /**
+   * @return boolean
+   */
+  public function getIpra()
+  {
+    return $this->ipra;
+  }
+
+  /**
+   * @return boolean
+   */
+  public function getSoftwareHeritage()
+  {
+    return $this->softwareHeritage;
   }
 
   /**
@@ -285,6 +320,14 @@ class Analysis
   public function getCompatibility()
   {
     return $this->compatibility;
+  }
+
+  /**
+   * @return boolean
+   */
+  public function getkotoba()
+  {
+    return $this->kotoba;
   }
 
   ////// Setters //////
@@ -353,6 +396,14 @@ class Analysis
   }
 
   /**
+   * @param boolean $scanoss
+   */
+  public function setScanoss($scanoss)
+  {
+    $this->scanoss = filter_var($scanoss, FILTER_VALIDATE_BOOLEAN);
+  }
+
+  /**
    * @param boolean $reso
    */
   public function setReso($reso)
@@ -363,9 +414,25 @@ class Analysis
   /**
    * @param boolean $package
    */
-  public function setPackage($package)
+  public function setPkgagent($pkgagent)
   {
-    $this->pkgagent = filter_var($package, FILTER_VALIDATE_BOOLEAN);
+    $this->pkgagent = filter_var($pkgagent, FILTER_VALIDATE_BOOLEAN);
+  }
+
+  /**
+   * @param boolean $ipra
+   */
+  public function setIpra($ipra)
+  {
+    $this->ipra = filter_var($ipra, FILTER_VALIDATE_BOOLEAN);
+  }
+
+  /**
+   * @param boolean $softwareHeritage
+   */
+  public function setSoftwareHeritage($softwareHeritage)
+  {
+    $this->softwareHeritage = filter_var($softwareHeritage, FILTER_VALIDATE_BOOLEAN);
   }
 
   /**
@@ -374,6 +441,14 @@ class Analysis
   public function setCompatibility($compatibility)
   {
     $this->compatibility = filter_var($compatibility, FILTER_VALIDATE_BOOLEAN);
+  }
+
+  /**
+   * @param boolean $kotoba
+   */
+  public function setkotoba($kotoba)
+  {
+    $this->kotoba = filter_var($kotoba, FILTER_VALIDATE_BOOLEAN);
   }
 
   /**
@@ -392,9 +467,13 @@ class Analysis
         "monk"      => $this->monk,
         "nomos"     => $this->nomos,
         "ojo"       => $this->ojo,
+        "scanoss"   => $this->scanoss,
         "reso"      => $this->reso,
-        "package"   => $this->pkgagent,
-        "compatibility" => $this->compatibility
+        "pkgagent"   => $this->pkgagent,
+        "ipra"    => $this->ipra,
+        "softwareHeritage" => $this->softwareHeritage,
+        "compatibility" => $this->compatibility,
+        "kotoba" => $this->kotoba
       ];
     } else {
       return [
@@ -406,9 +485,13 @@ class Analysis
         "monk"      => $this->monk,
         "nomos"     => $this->nomos,
         "ojo"       => $this->ojo,
+        "scanoss"   => $this->scanoss,
         "reso"      => $this->reso,
         "package"   => $this->pkgagent,
-        "compatibility" => $this->compatibility
+        "patent"    => $this->ipra,
+        "heritage" => $this->softwareHeritage,
+        "compatibility" => $this->compatibility,
+        "kotoba_bulk" => $this->kotoba
       ];
     }
   }

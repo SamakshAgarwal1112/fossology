@@ -12,6 +12,9 @@
       {% if tableRows is not empty %}
         <li><a href="#ObligationsConfTab">Obligations in Unified Report</a></li>
       {% endif %}
+      {% if ackRows is not empty %}
+        <li><a href="#acknowledgementsConfTab">Acknowledgements</a></li>
+      {% endif %}
       <li><a href="#SPDXConfTab">SPDX Report Settings</a></li>
       {% if globalClearingAvailable is not empty %}
         <li><a href="#clearingConfTab">Decision Settings</a></li>
@@ -231,6 +234,45 @@
         </table>
       </div>
     {% endif %}
+    {% if ackRows is not empty %}
+    <div id="acknowledgementsConfTab">
+      <table border="1" class="table">
+        <thead>
+          <tr>
+            <th style="width:5%">{{ "Count"|trans }}</th>
+            <th style="width:60%">{{ "Acknowledgement Text"|trans }}</th>
+            <th style="width:25%">{{ "Licenses"|trans }}</th>
+            <th style="width:10%">{{ "Action"|trans }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ ackRows }}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- modal to list files for selected acknowledgement -->
+    <div id="ackFilesModal" class="modal fade" tabindex="-1" role="dialog">
+      <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 class="modal-title">{{ "Files containing selected acknowledgement"|trans }}
+              <small id="ackFilesModalCount" class="text-muted"></small>
+            </h4>
+            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body" id="ackFilesModalBody"
+               style="max-height:60vh;overflow-y:auto;padding:10px 15px;"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-light" data-dismiss="modal">{{ "Close"|trans }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="SPDXConfTab">
       <table border="1" class="table">
         <tr>
@@ -246,7 +288,7 @@
             {{ "Show SPDX license comments"|trans }}
           </td>
           <td align="left">
-            <input type="checkbox" class="browse-upload-checkbox view-license-rc-size"  name="spdxLicenseComment" value="spdxLicenseComment" {{ spdxLicenseComment }} />
+            <input type="checkbox" class="browse-upload-checkbox view-license-rc-size"  name="spdxLicenseComment" value="spdxLicenseComment" {{ spdxLicenseComment }} id="spdxLicenseCommentCheckbox" />
          </td>
         </tr>
         <tr>
@@ -255,6 +297,15 @@
           </td>
           <td align="left">
             <input type="checkbox" class="browse-upload-checkbox view-license-rc-size"  name="ignoreFilesWOInfo" value="ignoreFilesWOInfo" {{ ignoreFilesWOInfo }} />
+          </td>
+        </tr>
+        <tr>
+          <td align="left">
+            {{ "Enable OSSelot export"|trans }}
+            <img src="images/info_16.png" data-toggle="tooltip" title="{{ 'When enabled, SPDX and ReadMeOSS exports will be OSSelot-compatible: custom licenses will be emitted as LicenseRef-<ShortName> (dropping &quot;-fossology-&quot;), ReadMeOSS will strip all LicenseRef- prefixes, and every license&apos;s full text will be included.'|trans }}" alt="" class="info-bullet"/>
+          </td>
+          <td align="left">
+            <input type="checkbox" class="browse-upload-checkbox view-license-rc-size"  name="osselotExport" value="osselotExport" {{ osselotExport }} id="osselotExportCheckbox" />
           </td>
         </tr>
       </table>
@@ -291,10 +342,10 @@
     {% endif %}
 
   </div>
-  <table border="0" align="center" cellpadding="20">
+  <table border="0" align="center" cellpadding="20" id="reportConfSubmit">
     <tr>
       <td>
-        <input type="submit" class="btn btn-default" name="submitReportConf" value="Submit" />
+        <input type="submit" class="btn btn-light" name="submitReportConf" value="Submit" />
       </td>
     </tr>
   </table>

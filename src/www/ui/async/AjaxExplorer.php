@@ -211,8 +211,8 @@ class AjaxExplorer extends DefaultPlugin
 
     $orderString = $this->getObject('utils.data_tables_utility')->getSortingString($request->get('fromRest') ? $request->request->all(): $request->query->all(), $columnNamesInDatabase, $defaultOrder);
 
-    $offset = $request->get('iDisplayStart');
-    $limit = $request->get('iDisplayLength');
+    $offset = intval($request->get('iDisplayStart'));
+    $limit = intval($request->get('iDisplayLength'));
     if ($offset) {
       $orderString .= " OFFSET $offset";
     }
@@ -407,7 +407,7 @@ class AjaxExplorer extends DefaultPlugin
           //call that function----file_id,upload_id,shortname
           try {
             $compatible = $this->compatibilityDao->getCompatibilityForFile($childItemTreeBounds, $shortName);
-          } catch (InvalidAgentStageException) {
+          } catch (InvalidAgentStageException $ex) {
             $compatible = true;
           }
           $licenseHtml = "";
@@ -447,7 +447,7 @@ class AjaxExplorer extends DefaultPlugin
 
     if ($isContainer) {
       $getTextEditBulk = _("Bulk");
-      $fileListLinks .= "[<a href='#' data-toggle='modal' data-target='#bulkModal' onclick='openBulkModal($childUploadTreeId)' >$getTextEditBulk</a>]";
+      $fileListLinks .= "[<a href='#' onclick='openBulkModal($childUploadTreeId)' >$getTextEditBulk</a>]";
     }
     $fileListLinks .= "<input type='checkbox' class='selectedForIrrelevant' class='info-bullet view-license-rc-size' value='".$childUploadTreeId."'>";
     $filesThatShouldStillBeCleared = array_key_exists($childItemTreeBounds->getItemId()

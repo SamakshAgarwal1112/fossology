@@ -316,7 +316,7 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
     $agentDao->shouldReceive('arsTableExists')->andReturn(true);
     $agentDao->shouldReceive('getCurrentAgentId')->andReturn($agentId=24);
     $agentDao->shouldReceive('writeArsRecord')->with(anything(), $agentId, $uploadId)->andReturn($arsId=2);
-    $agentDao->shouldReceive('writeArsRecord')->with(anything(), $agentId, $uploadId, $arsId, true)->andReturn(0);
+    $agentDao->shouldReceive('writeArsRecord')->with(anything(), $agentId, $uploadId, $arsId, anything())->andReturn(0);
 
     $jobId = 42;
     $groupId = 6;
@@ -327,13 +327,19 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
     $bounds0 = M::mock(ItemTreeBounds::class);
     $bounds0->shouldReceive('getItemId')->andReturn($itemIds[0]);
     $bounds0->shouldReceive('containsFiles')->andReturn(false);
+    $bounds0->shouldReceive('getUploadTreeTableName')->andReturn('uploadtree');
     $bounds1 = M::mock(ItemTreeBounds::class);
     $bounds1->shouldReceive('getItemId')->andReturn($itemIds[1]);
     $bounds1->shouldReceive('containsFiles')->andReturn(false);
+    $bounds1->shouldReceive('getUploadTreeTableName')->andReturn('uploadtree');
     $bounds = array($bounds0, $bounds1);
 
-    $uploadDao->shouldReceive('getItemTreeBounds')->with($itemIds[0])->andReturn($bounds[0]);
-    $uploadDao->shouldReceive('getItemTreeBounds')->with($itemIds[1])->andReturn($bounds[1]);
+    $uploadDao->shouldReceive('getItemTreeBoundsFromUploadId')->with($itemIds[0], $uploadId)->andReturn($bounds[0]);
+    $uploadDao->shouldReceive('getItemTreeBoundsFromUploadId')->with($itemIds[1], $uploadId)->andReturn($bounds[1]);
+    $uploadDao->shouldReceive('getUploadEntry')->with($itemIds[0], 'uploadtree')
+      ->andReturn(array('pfile_fk' => 1));
+    $uploadDao->shouldReceive('getUploadEntry')->with($itemIds[1], 'uploadtree')
+      ->andReturn(array('pfile_fk' => 2));
 
     $clearingDao->shouldReceive('getEventIdsOfJob')->with($jobId)
             ->andReturn(array($itemIds[0] => array(), $itemIds[1] => array()));

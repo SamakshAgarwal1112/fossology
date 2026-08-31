@@ -1,5 +1,6 @@
 /*
  SPDX-FileCopyrightText: © 2011-2013 Hewlett-Packard Development Company, L.P.
+ SPDX-FileContributor: Kaushlendra Pratap <kaushlendra-pratap.singh@siemens.com>
 
  SPDX-License-Identifier: GPL-2.0-only
 */
@@ -57,9 +58,16 @@ int IsInflatedFile(char *FileName, int InflateSize)
          e.g. for the file ./10g.tar.bz.dir/10g.tar, partent file is ./10g.tar.bz
        */
       FileNameParent[strlen(FileNameParent) - 4] = '\0';
-      stat(FileNameParent, &stParent);
-      stat(FileName, &st);
-      if(S_ISREG(stParent.st_mode) && (st.st_size/stParent.st_size > InflateSize))
+
+      /* Ensure parent and child files exist and can be stated */
+      if (stat(FileNameParent, &stParent) != 0 || stat(FileName, &st) != 0)
+      {
+        return 0;
+      }
+
+      /* Guard against division by zero */
+      if(S_ISREG(stParent.st_mode) && stParent.st_size > 0 && 
+         (st.st_size/stParent.st_size > InflateSize))
       {
         result = 1;
       }
@@ -476,7 +484,7 @@ int	CopyFile	(char *Src, char *Dst)
 
   /* load the source file */
   Mmap = mmap(0,LenIn,PROT_READ,MAP_PRIVATE,Fin,0);
-  if (Mmap == NULL)
+  if (Mmap == MAP_FAILED)
   {
     LOG_FATAL("pfile %s Unable to process file.",Pfile_Pk);
     LOG_WARNING("pfile %s Mmap failed during copy.",Pfile_Pk);
@@ -582,6 +590,7 @@ void	CheckCommands	(int Show)
       case CMD_AR:
       case CMD_PARTITION:
       case CMD_ZSTD:
+      case CMD_LZIP:
         CMD[i].Status = IsExe(CMD[i].Cmd,Quiet);
         break;
       default:
@@ -1771,4 +1780,35 @@ void	Usage	(char *Name, char *Version)
  **/
  void SQLNoticeProcessor(void *arg, const char *message)
  {
+ }
+
+/**
+ * \brief Determines if a file or folder should be excluded.
+ *
+ * This function checks whether the supplied file name, `Filename`, contains any of the
+ * substrings listed in the comma-separated string `ExcludePatterns`. Each pattern is matched
+ * directly as a substring; no wildcard or directory-specific matching is performed.
+ *
+ * \param Filename The name of the file or folder to be examined.
+ * \param ExcludePatterns A comma-separated list of substrings used for determining exclusion.
+ * \returns 1 if a substring match is found (folder is to be excluded), or 0 otherwise.
+ */
+ int ShouldExclude(char *Filename, const char *ExcludePatterns)
+ {
+   if (!ExcludePatterns || !Filename) return 0;
+
+   char *patternsCopy = strdup(ExcludePatterns);
+   if (!patternsCopy) return 0;
+
+   char *pattern = strtok(patternsCopy, ",");
+   while (pattern != NULL) {
+     if (strstr(Filename, pattern)) {
+       if (Verbose) LOG_DEBUG("Excluding: %s (matched substring: %s)", Filename, pattern);
+       free(patternsCopy);
+       return 1;
+     }
+     pattern = strtok(NULL, ",");
+   }
+   free(patternsCopy);
+   return 0;
  }

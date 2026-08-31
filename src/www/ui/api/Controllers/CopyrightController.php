@@ -91,7 +91,7 @@ class CopyrightController extends RestController
   /**
    * Get all user copyright findings for a particular upload-tree
    *
-   * @param  ServerRequestInterface $request
+   * @param  S  erverRequestInterface $request
    * @param  ResponseHelper         $response
    * @param  array                  $args
    * @return ResponseHelper
@@ -890,6 +890,7 @@ class CopyrightController extends RestController
       }
     }
     $offset = $limit * ($page - 1);
+
     if (self::TYPE_COPYRIGHT_USERFINDINGS == $cxType) {
       list($rows, $iTotalRecords) = $this->copyrightDao
         ->getUserCopyrights($uploadPk, $uploadTreeId, $uploadTreeTableName,
@@ -936,7 +937,7 @@ class CopyrightController extends RestController
     $this->uploadAccessible($uploadPk);
     $this->isItemExists($uploadPk, $uploadTreeId);
 
-    $uploadTreeTableName = $uploadDao->getUploadTreeTableName($uploadTreeId);
+    $uploadTreeTableName = $uploadDao->getUploadTreeTableName($uploadPk);
     if (self::TYPE_COPYRIGHT_USERFINDINGS == $cxType) {
       $tableName = $cpTable."_decision";
       $decisions = $this->copyrightDao->getDecisionsFromHash($tableName, $copyrightHash,
@@ -974,7 +975,7 @@ class CopyrightController extends RestController
     $this->uploadAccessible($uploadPk);
     $this->isItemExists($uploadPk, $uploadTreeId);
 
-    $uploadTreeTableName = $this->restHelper->getUploadDao()->getuploadTreeTableName($uploadTreeId);
+    $uploadTreeTableName = $this->restHelper->getUploadDao()->getuploadTreeTableName($uploadPk);
     if (self::TYPE_COPYRIGHT_USERFINDINGS == $cxType) {
       $tableName = $cpTable."_decision";
       $decisions = $this->copyrightDao->getDecisionsFromHash($tableName, $copyrightHash,
@@ -1015,7 +1016,7 @@ class CopyrightController extends RestController
     $this->uploadAccessible($uploadPk);
     $this->isItemExists($uploadPk, $uploadTreeId);
 
-    $uploadTreeTableName = $this->restHelper->getUploadDao()->getuploadTreeTableName($uploadTreeId);
+    $uploadTreeTableName = $this->restHelper->getUploadDao()->getuploadTreeTableName($uploadPk);
     if (self::TYPE_COPYRIGHT_USERFINDINGS == $cxType) {
       $tableName = $cpTable."_decision";
       $decisions = $this->copyrightDao->getDecisionsFromHash($tableName, $copyrightHash,

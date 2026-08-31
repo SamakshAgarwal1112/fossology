@@ -16,7 +16,8 @@ use Fossology\CliXml\UI\CliXmlGeneratorUi;
 use Fossology\DecisionExporter\UI\FoDecisionExporter;
 use Fossology\DecisionImporter\UI\AgentDecisionImporterPlugin;
 use Fossology\ReadmeOSS\UI\ReadMeOssPlugin;
-use Fossology\SpdxTwo\UI\SpdxTwoGeneratorUi;
+use Fossology\Spdx\UI\SpdxTwoGeneratorUi;
+use Fossology\Spdx\UI\SpdxThreeGeneratorUi;
 use Fossology\UI\Api\Exceptions\HttpBadRequestException;
 use Fossology\UI\Api\Exceptions\HttpErrorException;
 use Fossology\UI\Api\Exceptions\HttpForbiddenException;
@@ -50,11 +51,16 @@ class ReportController extends RestController
     'dep5',
     'spdx2',
     'spdx2tv',
+    'spdx2csv',
     'readmeoss',
     'unifiedreport',
     'clixml',
     'decisionexporter',
-    'cyclonedx'
+    'cyclonedx',
+    'spdx3json',
+    'spdx3rdf',
+    'spdx3jsonld',
+    'spdx3tv'
   );
 
   /**
@@ -102,43 +108,53 @@ class ReportController extends RestController
     $jobQueueId = null;
 
     switch ($reportFormat) {
-      case $this->reportsAllowed[0]:
-      case $this->reportsAllowed[1]:
-      case $this->reportsAllowed[2]:
+      case 'dep5':
+      case 'spdx2':
+      case 'spdx2tv':
+      case 'spdx2csv':
         /** @var SpdxTwoGeneratorUi $spdxGenerator */
         $spdxGenerator = $this->restHelper->getPlugin('ui_spdx2');
         list ($jobId, $jobQueueId, $error) = $spdxGenerator->scheduleAgent(
           $this->restHelper->getGroupId(), $upload, $reportFormat);
         break;
-      case $this->reportsAllowed[3]:
+      case 'readmeoss':
         /** @var ReadMeOssPlugin $readmeGenerator */
         $readmeGenerator = $this->restHelper->getPlugin('ui_readmeoss');
         list ($jobId, $jobQueueId, $error) = $readmeGenerator->scheduleAgent(
           $this->restHelper->getGroupId(), $upload);
         break;
-      case $this->reportsAllowed[4]:
+      case 'unifiedreport':
         /** @var FoUnifiedReportGenerator $unifiedGenerator */
         $unifiedGenerator = $this->restHelper->getPlugin('agent_founifiedreport');
         list ($jobId, $jobQueueId, $error) = $unifiedGenerator->scheduleAgent(
           $this->restHelper->getGroupId(), $upload);
         break;
-      case $this->reportsAllowed[5]:
+      case 'clixml':
         /** @var CliXmlGeneratorUi $clixmlGenerator */
         $clixmlGenerator = $this->restHelper->getPlugin('ui_clixml');
         list ($jobId, $jobQueueId) = $clixmlGenerator->scheduleAgent(
           $this->restHelper->getGroupId(), $upload);
         break;
-      case $this->reportsAllowed[6]:
+      case 'decisionexporter':
         /** @var FoDecisionExporter $decisionExporter */
         $decisionExporter = $this->restHelper->getPlugin('agent_fodecisionexporter');
         list($jobId, $jobQueueId) = $decisionExporter->scheduleAgent(
           $this->restHelper->getGroupId(), $upload);
         break;
-      case $this->reportsAllowed[7]:
+      case 'cyclonedx':
         /** @var CycloneDXGeneratorUi $cyclonedxGenerator */
         $cyclonedxGenerator = $this->restHelper->getPlugin('ui_cyclonedx');
         list ($jobId, $jobQueueId) = $cyclonedxGenerator->scheduleAgent(
           $this->restHelper->getGroupId(), $upload);
+        break;
+      case 'spdx3json':
+      case 'spdx3rdf':
+      case 'spdx3jsonld':
+      case 'spdx3tv':
+        /** @var SpdxThreeGeneratorUi $spdx3Generator */
+        $spdx3Generator = $this->restHelper->getPlugin('ui_spdx3');
+        list ($jobId, $jobQueueId, $error) = $spdx3Generator->scheduleAgent(
+          $this->restHelper->getGroupId(), $upload, $reportFormat);
         break;
       default:
         throw new HttpInternalServerErrorException("Some error occured!");
@@ -246,12 +262,16 @@ class ReportController extends RestController
       'SELECT jq_type FROM jobqueue WHERE jq_job_fk = $1', array(
         $id
       ), "reportValidity");
-    if (! in_array($row['jq_type'], $this->reportsAllowed)) {
+    if (empty($row) || ! in_array($row['jq_type'], $this->reportsAllowed)) {
       throw new HttpNotFoundException(
         "No report scheduled with given job id.");
     }
     $row = $dbManager->getSingleRow('SELECT job_upload_fk FROM job WHERE job_pk = $1',
       array($id), "reportFileUpload");
+    if (empty($row)) {
+      throw new HttpNotFoundException(
+        "No report scheduled with given job id.");
+    }
     $uploadId = intval($row['job_upload_fk']);
     $uploadDao = $this->restHelper->getUploadDao();
     if (! $uploadDao->isAccessible($uploadId, $this->restHelper->getGroupId())) {

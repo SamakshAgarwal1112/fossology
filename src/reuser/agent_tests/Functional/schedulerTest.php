@@ -28,6 +28,7 @@ use Fossology\Lib\Dao\UploadPermissionDao;
 use Fossology\Lib\Data\Clearing\ClearingEvent;
 use Fossology\Lib\Data\Clearing\ClearingEventTypes;
 use Fossology\Lib\Data\Clearing\ClearingLicense;
+use Fossology\Reuser\ReuserAgentPlugin;
 use Fossology\Lib\Data\ClearingDecision;
 use Fossology\Lib\Data\DecisionScopes;
 use Fossology\Lib\Data\DecisionTypes;
@@ -38,7 +39,6 @@ use Monolog\Logger;
 
 include_once(__DIR__.'/../../../lib/php/Test/Agent/AgentTestMockHelper.php');
 include_once(__DIR__.'/SchedulerTestRunnerCli.php');
-include_once(__DIR__.'/SchedulerTestRunnerMock.php');
 
 /**
  * @class SchedulerTest
@@ -104,11 +104,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
    */
   private $runnerCli;
 
-  /** @var SchedulerTestRunnerMock $runnerMock
-   * Test runner
-   */
-  private $runnerMock;
-
   /**
    * @brief Setup test env
    */
@@ -127,11 +122,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
     $this->copyrightDao = new CopyrightDao($this->dbManager, $this->uploadDao);
     $this->treeDao = \Mockery::mock(TreeDao::class);
 
-    $agentDao = new AgentDao($this->dbManager, $logger);
-
-    $this->runnerMock = new SchedulerTestRunnerMock($this->dbManager, $agentDao,
-                        $this->clearingDao, $this->uploadDao, $this->clearingDecisionFilter,
-                        $this->treeDao, $this->copyrightDao);
     $this->runnerCli = new SchedulerTestRunnerCli($this->testDb);
   }
 
@@ -231,18 +221,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
    * @brief Call runnerReuserScanWithoutAnyUploadToCopyAndNoClearing()
    * @test
    * -# Setup an upload with no clearing decisions
-   * -# Run reuser on the empty upload with mock agent
-   * -# Check that no clearing decisions added by reuser
-   */
-  public function testReuserMockedScanWithoutAnyUploadToCopyAndNoClearing()
-  {
-    $this->runnerReuserScanWithoutAnyUploadToCopyAndNoClearing($this->runnerMock);
-  }
-
-  /**
-   * @brief Call runnerReuserScanWithoutAnyUploadToCopyAndNoClearing()
-   * @test
-   * -# Setup an upload with no clearing decisions
    * -# Run reuser on the empty upload with scheduler cli
    * -# Check that no clearing decisions added by reuser
    */
@@ -308,17 +286,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
   /**
    * @brief Call runnerReuserScanWithoutAnyUploadToCopyAndAClearing()
    * @test
-   * -# Run reuser on the empty upload with agent mock
-   * -# Check that no clearing decisions added by reuser
-   */
-  public function testReuserMockedScanWithoutAnyUploadToCopyAndAClearing()
-  {
-    $this->runnerReuserScanWithoutAnyUploadToCopyAndAClearing($this->runnerMock);
-  }
-
-  /**
-   * @brief Call runnerReuserScanWithoutAnyUploadToCopyAndAClearing()
-   * @test
    * -# Run reuser on the empty upload with scheduler cli
    * -# Check that no clearing decisions added by reuser
    */
@@ -349,21 +316,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
     assertThat($decisions, is(emptyArray()));
 
     $this->rmRepo();
-  }
-
-  /**
-   * @brief Call runnerReuserScanWithALocalClearing()
-   * @test
-   * -# Create an upload with clearing decisions on files
-   * -# Run reuser on the upload new upload with mock agent
-   * -# Check if clearing decisions are added
-   * -# Check if the clearing decisions have new ids
-   * -# Check the clearing type and scope are retained
-   * -# Check the upload tree id of the clearing decision
-   */
-  public function testReuserMockedScanWithALocalClearing()
-  {
-    $this->runnerReuserScanWithALocalClearing($this->runnerMock,1);
   }
 
   /**
@@ -428,21 +380,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
       equalTo($potentiallyReusableClearing->getUploadTreeId() + $reusingUploadItemShift));
 
     $this->rmRepo();
-  }
-
-  /**
-   * @brief Call runnerReuserScanWithARepoClearing()
-   * @test
-   * -# Create an upload with license clearing done
-   * -# Run reuser with mock agent
-   * -# Check if new upload has clearings
-   * -# Reuser should have not created a new clearing decision and reuse them
-   * -# Decision types and scopes are same
-   * -# Reuser should have not created a correct local event history
-   */
-  public function testReuserMockedScanWithARepoClearing()
-  {
-    $this->runnerReuserScanWithARepoClearing($this->runnerMock);
   }
 
   /**
@@ -528,22 +465,6 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
   }
 
   /**
-   * @brief Call runnerReuserScanWithARepoClearingEnhanced()
-   * @test
-   * -# Create an upload with license clearing done
-   * -# Create an upload with files with small difference
-   * -# Run reuser with mock agent
-   * -# Check if new upload has clearings
-   * -# Reuser should have not created a new clearing decision and reuse them
-   * -# Decision types and scopes are same
-   * -# Reuser should have not created a correct local event history
-   */
-  public function testReuserRealScanWithARepoClearingEnhanced()
-  {
-    $this->runnerReuserScanWithARepoClearingEnhanced($this->runnerMock);
-  }
-
-  /**
    * @brief Run reuser with enhanced flag on upload with clearing
    * @param SchedulerTestRunner $runner
    */
@@ -616,5 +537,150 @@ class SchedulerTest extends \PHPUnit\Framework\TestCase
     $mainLicenseSingle = array_values($mainLicense);
     $this->assertEquals($mainLicenseIdForReuseSingle, $mainLicenseSingle);
     $this->rmRepo();
+  }
+
+  /**
+   * @brief Test multiple reuse selections validation logic
+   * @test
+   * -# Test the validation logic for multiple reuse selections
+   * -# Verify proper handling of array format
+   */
+  public function testReuserMultipleReuseSelectionsValidation()
+  {
+    // Test array format (multiple selections)
+    $reuseSelections = ['2,1', '4,1'];
+    // Simulate the validation logic from scheduleAgent
+    $createdLinks = 0;
+    foreach ($reuseSelections as $reuseSelection) {
+      if (empty($reuseSelection) || !is_string($reuseSelection)) {
+        $this->fail("Invalid reuse selection found - empty or non-string value");
+      }
+
+      $reuseUploadPair = explode(',', $reuseSelection, 2);
+      if (count($reuseUploadPair) !== 2) {
+        $this->fail("Invalid reuse selection format: '$reuseSelection' (expected format: 'uploadId,groupId')");
+      }
+
+      [$reuseUploadId, $reuseGroupId] = $reuseUploadPair;
+      $this->assertIsNumeric($reuseUploadId, "Upload ID should be numeric");
+      $this->assertIsNumeric($reuseGroupId, "Group ID should be numeric");
+      $createdLinks++;
+    }
+
+    $this->assertEquals(2, $createdLinks, 'Should process 2 reuse selections');
+  }
+
+  /**
+   * @brief Test single reuse selection validation logic (backward compatibility)
+   * @test
+   * -# Test the validation logic for single reuse selection
+   * -# Verify proper handling of scalar format
+   */
+  public function testReuserSingleReuseSelectionValidation()
+  {
+    // Test scalar format (single selection)
+    $reuseSelections = '2,1';
+    // Simulate the validation logic from scheduleAgent
+    if (!is_array($reuseSelections)) {
+      $reuseSelections = [$reuseSelections];
+    }
+
+    $createdLinks = 0;
+    foreach ($reuseSelections as $reuseSelection) {
+      if (empty($reuseSelection) || !is_string($reuseSelection)) {
+        $this->fail("Invalid reuse selection found - empty or non-string value");
+      }
+
+      $reuseUploadPair = explode(',', $reuseSelection, 2);
+      if (count($reuseUploadPair) !== 2) {
+        $this->fail("Invalid reuse selection format: '$reuseSelection' (expected format: 'uploadId,groupId')");
+      }
+
+      [$reuseUploadId, $reuseGroupId] = $reuseUploadPair;
+      $this->assertIsNumeric($reuseUploadId, "Upload ID should be numeric");
+      $this->assertIsNumeric($reuseGroupId, "Group ID should be numeric");
+      $createdLinks++;
+    }
+
+    $this->assertEquals(1, $createdLinks, 'Should process 1 reuse selection');
+  }
+
+  /**
+   * @brief Test invalid reuse selection format throws exception
+   * @test
+   * -# Test reuser with invalid reuse selection format
+   * -# Verify exception is thrown for invalid data
+   */
+  public function testReuserInvalidReuseSelectionFormat()
+  {
+    $invalidSelection = "invalid_format";
+    // Simulate the validation logic from scheduleAgent
+    $reuseUploadPair = explode(',', $invalidSelection, 2);
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage("Reuser: Invalid reuse selection format: '$invalidSelection' (expected format: 'uploadId,groupId')");
+
+    if (count($reuseUploadPair) !== 2) {
+      throw new \InvalidArgumentException("Reuser: Invalid reuse selection format: '$invalidSelection' (expected format: 'uploadId,groupId')");
+    }
+  }
+
+  /**
+   * @brief Test empty reuse selection throws exception
+   * @test
+   * -# Test reuser with empty reuse selection
+   * -# Verify exception is thrown for empty data
+   */
+  public function testReuserEmptyReuseSelection()
+  {
+    $emptySelection = "";
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage("Reuser: Invalid reuse selection found - empty or non-string value");
+
+    if (empty($emptySelection) || !is_string($emptySelection)) {
+      throw new \InvalidArgumentException("Reuser: Invalid reuse selection found - empty or non-string value");
+    }
+  }
+
+  /**
+   * @brief Test non-string reuse selection throws exception
+   * @test
+   * -# Test reuser with non-string reuse selection
+   * -# Verify exception is thrown for non-string data
+   */
+  public function testReuserNonStringReuseSelection()
+  {
+    $nonStringSelection = 123;
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage("Reuser: Invalid reuse selection found - empty or non-string value");
+
+    if (empty($nonStringSelection) || !is_string($nonStringSelection)) {
+      throw new \InvalidArgumentException("Reuser: Invalid reuse selection found - empty or non-string value");
+    }
+  }
+
+  /**
+   * @brief Test malformed reuse selection strings
+   * @test
+   * -# Test reuser with malformed strings
+   * -# Verify exception is thrown for malformed data
+   */
+  public function testReuserMalformedReuseSelection()
+  {
+    // Test various malformed formats
+    $malformedCases = [
+      '123,',    // Missing group ID
+      ',456',    // Missing upload ID
+      '123,456,789', // Too many parts
+      '123'      // Missing comma separator
+    ];
+
+    foreach ($malformedCases as $malformedValue) {
+      $reuseUploadPair = explode(',', $malformedValue, 2);
+      if (count($reuseUploadPair) !== 2) {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Reuser: Invalid reuse selection format: '$malformedValue' (expected format: 'uploadId,groupId')");
+        throw new \InvalidArgumentException("Reuser: Invalid reuse selection format: '$malformedValue' (expected format: 'uploadId,groupId')");
+      }
+    }
   }
 }

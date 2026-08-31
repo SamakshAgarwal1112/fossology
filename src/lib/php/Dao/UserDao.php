@@ -63,6 +63,30 @@ class UserDao
   }
 
   /**
+   * Get active users of a group as user_pk => user_name.
+   *
+   * @param int|null $groupId
+   * @return array
+   */
+  public function getUsersByGroup($groupId=null)
+  {
+    if (empty($groupId)) {
+      $groupId = Auth::getGroupId();
+    }
+    $userChoices = array();
+    $statementN = __METHOD__;
+    $sql = "SELECT user_pk, user_name FROM users LEFT JOIN group_user_member AS gum ON users.user_pk = gum.user_fk"
+            . " WHERE gum.group_fk = $1 AND users.user_status='active'";
+    $this->dbManager->prepare($statementN, $sql);
+    $res = $this->dbManager->execute($statementN, array($groupId));
+    while ($rw = $this->dbManager->fetchArray($res)) {
+      $userChoices[$rw['user_pk']] = $rw['user_name'];
+    }
+    $this->dbManager->freeResult($res);
+    return $userChoices;
+  }
+
+  /**
    * @brief get array of groups that this user has admin access to
    * @param int $userId
    * @return array in the format {group_pk=>group_name, group_pk=>group_name, ...}
@@ -442,5 +466,24 @@ class UserDao
   public function getAllUsers()
   {
     return $this->dbManager->getRows("SELECT * FROM users ORDER BY user_name;");
+  }
+
+  /**
+   * @param int $groupId
+   * @param string $newGroupName
+   * @throws \Exception if the name is already taken by another group
+   */
+  function editGroup($groupId, $newGroupName)
+  {
+    $groupAlreadyExists = $this->dbManager->getSingleRow(
+            "SELECT group_pk FROM groups WHERE LOWER(group_name)=LOWER($1) AND group_pk!=$2",
+            array($newGroupName, $groupId),
+            __METHOD__.'.gExists');
+    if ($groupAlreadyExists) {
+      throw new \Exception(_("Group exists. Try different Name, Group-Name checking is case-insensitive and Duplicate not allowed"));
+    }
+
+    $this->dbManager->getSingleRow('UPDATE groups SET group_name=$2 WHERE group_pk=$1;',
+            array($groupId, $newGroupName),__METHOD__.'.UpdateEditGroup');
   }
 }

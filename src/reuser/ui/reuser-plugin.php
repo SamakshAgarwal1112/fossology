@@ -15,6 +15,7 @@ use Fossology\Lib\Plugin\DefaultPlugin;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Fossology\Lib\Util\OsselotLookupHelper;
 
 include_once(__DIR__ . "/../agent/version.php");
 
@@ -29,6 +30,24 @@ class ReuserPlugin extends DefaultPlugin
   const REUSE_FOLDER_SELECTOR_NAME = 'reuseFolderSelectorName'; ///< Reuse upload folder element name
   const UPLOAD_TO_REUSE_SELECTOR_NAME = 'uploadToReuse';  ///< Upload to reuse HTML element name
   const FOLDER_PARAMETER_NAME = 'folder';   ///< Folder parameter HTML element name
+
+  /**
+   * Extract package name from filename
+   * @param string $filename
+   * @return string
+   */
+  private function extractPackageNameFromFilename($filename)
+  {
+    if (empty($filename)) {
+      return '';
+    }
+
+    $nameWithoutExt = preg_replace('/\.[^.]+$/', '', $filename);
+    $parts = explode('-', $nameWithoutExt);
+    $packageName = strtolower($parts[0]);
+
+    return $packageName;
+  }
 
   /** @var string $AgentName
    * Agent name from DB
@@ -50,23 +69,22 @@ class ReuserPlugin extends DefaultPlugin
   }
 
   /**
-   * @brief Get all uploads accessible to curent user
-   *
-   * Gets all folders accessible by current user and iterate them. Find every
-   * upload with in that folder and add data from prepareFolderUploads().
+   * @brief Get all uploads accessible to current user
    * @return array Key as upload id
    */
   function getAllUploads()
   {
-    $allFolder = $this->folderDao->getAllFolderIds();
-    $result = array();
-    for ($i=0; $i < sizeof($allFolder); $i++) {
-      $listObject = $this->prepareFolderUploads($allFolder[$i]);
-      foreach ($listObject as $key => $value) {
-        $result[explode(",",$key)[0]] = $value;
-      }
+    $trustGroupId = Auth::getGroupId();
+    $folderUploads = $this->folderDao->getAllUploadsForGroup($trustGroupId);
+    $uploadsById = array();
+    foreach ($folderUploads as $uploadProgress) {
+      $key = $uploadProgress->getId();
+      $display = $uploadProgress->getFilename() . _(" from ")
+            . Convert2BrowserTime(date("Y-m-d H:i:s", $uploadProgress->getTimestamp()))
+            . ' (' . $uploadProgress->getStatusString() . ')';
+      $uploadsById[$key] = $display;
     }
-    return $result;
+    return $uploadsById;
   }
 
   /**
@@ -76,17 +94,38 @@ class ReuserPlugin extends DefaultPlugin
   protected function handle(Request $request)
   {
     $this->folderDao->ensureTopLevelFolder();
-    list($folderId, $trustGroupId) = $this->getFolderIdAndTrustGroup($request->get(self::FOLDER_PARAMETER_NAME));
-    $ajaxMethodName = $request->get('do');
+    $ajax = $request->get('do');
 
-    if ($ajaxMethodName == "getUploads") {
-      $uploadsById = "";
-      if (empty($folderId) || empty($trustGroupId)) {
-        $uploadsById = $this->getAllUploads();
-      } else {
-        $uploadsById = $this->prepareFolderUploads($folderId, $trustGroupId);
+    if ($ajax === 'getUploads') {
+        list($fid, $tgid) = $this->getFolderIdAndTrustGroup($request->get(self::FOLDER_PARAMETER_NAME, ''));
+        $uploads = (empty($fid) || empty($tgid))
+            ? $this->getAllUploads()
+            : $this->prepareFolderUploads($fid, $tgid);
+        return new JsonResponse($uploads, JsonResponse::HTTP_OK);
+    }
+
+    if ($ajax === 'getOsselotVersions') {
+        $pkg = trim($request->get('pkg', $request->get('osselotPackage', '')));
+      if ($pkg === '') {
+          return new JsonResponse([], JsonResponse::HTTP_OK);
       }
-      return new JsonResponse($uploadsById, JsonResponse::HTTP_OK);
+        $helper = new OsselotLookupHelper();
+      try {
+          $versions = $helper->getVersions($pkg);
+      } catch (\Exception $e) {
+          $versions = [];
+      }
+        return new JsonResponse($versions, JsonResponse::HTTP_OK);
+    }
+
+    if ($ajax === 'extractPackageName') {
+        $filename = trim($request->get('filename', ''));
+      if ($filename === '') {
+          return new JsonResponse(['packageName' => ''], JsonResponse::HTTP_OK);
+      }
+
+        $packageName = $this->extractPackageNameFromFilename($filename);
+        return new JsonResponse(['packageName' => $packageName], JsonResponse::HTTP_OK);
     }
 
     return new Response('called without valid method', Response::HTTP_METHOD_NOT_ALLOWED);
@@ -118,6 +157,8 @@ class ReuserPlugin extends DefaultPlugin
    */
   public function renderContent(&$vars)
   {
+    global $SysConf;
+    $osselotAvailable = (array_key_exists('EnableOsselotReuse', $SysConf['SYSCONFIG']) && $SysConf['SYSCONFIG']["EnableOsselotReuse"] === 'true');
     if (!array_key_exists('folderStructure', $vars)) {
       $rootFolderId = $this->folderDao->getRootFolder(Auth::getUserId())->getId();
       $vars['folderStructure'] = $this->folderDao->getFolderStructure($rootFolderId);
@@ -136,6 +177,9 @@ class ReuserPlugin extends DefaultPlugin
     $vars['folderParameterName'] = self::FOLDER_PARAMETER_NAME;
     $vars['uploadToReuseSelectorName'] = self::UPLOAD_TO_REUSE_SELECTOR_NAME;
     $vars['folderUploads'] = $this->prepareFolderUploads($folderId, $trustGroupId);
+    $vars['osselotAvailable'] = $osselotAvailable;
+    $vars['defaultPkgName']  = '';
+    $vars['userIsAdmin']     = Auth::isAdmin();
 
     $renderer = $this->getObject('twig.environment');
     return $renderer->load('agent_reuser.html.twig')->render($vars);
@@ -148,11 +192,25 @@ class ReuserPlugin extends DefaultPlugin
    */
   public function renderFoot(&$vars)
   {
+    global $SysConf;
+    $osselotAvailable = (array_key_exists('EnableOsselotReuse', $SysConf['SYSCONFIG']) && $SysConf['SYSCONFIG']["EnableOsselotReuse"] === 'true');
     $vars['reuseFolderSelectorName'] = self::REUSE_FOLDER_SELECTOR_NAME;
     $vars['folderParameterName'] = self::FOLDER_PARAMETER_NAME;
     $vars['uploadToReuseSelectorName'] = self::UPLOAD_TO_REUSE_SELECTOR_NAME;
+    $vars['osselotAvailable']           = $osselotAvailable;
+
     $renderer = $this->getObject('twig.environment');
     return $renderer->load('agent_reuser.js.twig')->render($vars);
+  }
+
+  /**
+   * @brief Render JS inclues
+   * @param array $vars
+   * @return string
+   */
+  public function getScriptIncludes(&$vars)
+  {
+    return '<script src="scripts/tools.js" type="text/javascript"></script>';
   }
 
   /**

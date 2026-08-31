@@ -3,7 +3,7 @@ SPDX-License-Identifier: GPL-2.0-only
 SPDX-FileCopyrightText: © 2021 Avinal Kumar <avinal.xlvii@gmail.com>
 #]=======================================================================]
 
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 project(www)
 # set defaults
 
@@ -15,7 +15,7 @@ set(FO_WWW_OBSOLETE
     admin-folder-delete.php admin-dashboard.php ajax-showjobs.php
     group-manage-self.php group-manage.php ajax-perms.php
     upload_permissions.php upload-srv-files.php upload-vcs.php
-    ui-license-list.php ui-browse-license.php
+    ui-license-list.php ui-browse-license.php ui-picker.php
     template/ui-license-list-form.html.twig
     template/components template/include
 )

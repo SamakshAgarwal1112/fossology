@@ -51,6 +51,18 @@ class SpdxTwoImportSource implements ImportSource
     return $this->graph !== null && $this->spdxDoc !== null;
   }
 
+  public function getVersion(){
+    RdfNamespace::set('spdx', self::TERMS);
+    $this->graph = $this->loadGraph($this->filename, $this->uri);
+    $this->spdxDoc = (count($docs = $this->graph->allOfType("spdx:SpdxDocument"))) == 1 ? $docs[0] : null;
+    if ($this->spdxDoc !== null){
+      $specVersion = explode('-', $this->spdxDoc->getLiteral("spdx:specVersion"))[1];
+      return $specVersion;
+    } else {
+      return null;
+    }
+  }
+
   private function loadGraph($filename, $uri = null)
   {
     /** @var Graph $graph */
@@ -273,22 +285,26 @@ class SpdxTwoImportSource implements ImportSource
       $rawLicenseId = $licenseIdLiteral->getValue();
       $licenseId = $this->stripLicenseRefPrefix($rawLicenseId);
 
+      $isCustomText = false;
       if ($license->isA('spdx:ExtractedLicensingInfo') &&
         (strlen($licenseId) > 33 &&
           substr($licenseId, -33, 1) === "-" &&
           ctype_alnum(substr($licenseId, -32))
         )) {
         $licenseId = substr($licenseId, 0, -33);
-        $item = new ReportImportDataItem($licenseId);
-        $item->setCustomText($licenseTextLiteral->getValue());
-      } else {
-        $item = new ReportImportDataItem($licenseId);
-        $item->setLicenseCandidate($licenseNameLiteral->getValue(),
-          $licenseTextLiteral->getValue(),
-          strpos($rawLicenseId, LicenseRef::SPDXREF_PREFIX),
-          ($seeAlsoLiteral != null) ? $seeAlsoLiteral->getValue() : ""
-        );
+        $isCustomText = true;
       }
+
+      $item = new ReportImportDataItem($licenseId);
+      if ($isCustomText) {
+        $item->setCustomText($licenseTextLiteral->getValue());
+      }
+      $item->setLicenseCandidate($licenseNameLiteral->getValue(),
+        $licenseTextLiteral->getValue(),
+        strpos($rawLicenseId, LicenseRef::SPDXREF_PREFIX),
+        ($seeAlsoLiteral != null) ? $seeAlsoLiteral->getValue() : ""
+      );
+
       return [$item];
     }
     return [];

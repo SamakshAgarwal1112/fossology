@@ -45,6 +45,7 @@ abstract class HistogramBase extends FO_Plugin
     $this->renderer = $container->get('twig.environment');
 
     $this->vars['name']=$this->Name;
+    $this->additionalAgentName = "scancode";
   }
 
   /**
@@ -69,8 +70,8 @@ abstract class HistogramBase extends FO_Plugin
     }
     $output = "<h4>Activated $typeDescriptor statements:</h4>
 <div>
-  <div class='btn btn-default' style='float:right; padding:5px; margin:5px;'>
-    <input type='checkbox' style='padding:2px;' id='inverseSearchActivated".$type."' name='inverseSearch'/> 
+  <div class='btn btn-light' style='float:right; padding:5px; margin:5px;'>
+    <input type='checkbox' style='padding:2px;' id='inverseSearchActivated".$type."' name='inverseSearch'/>
     <label class='control-label' for='inverseSearchActivated".$type."'>Inverse Search</label>
   </div>
 <table border=1 width='100%' id='copyright".$type."' class='wordbreaktable'></table></div>
@@ -89,7 +90,7 @@ abstract class HistogramBase extends FO_Plugin
     <td rowspan='2'>
       <div class='form-group'>
         <div class='col-sm-offset-2 col-sm-10'>
-          <button class='btn btn-default' style='margin-top:25px;padding:15%;' onClick='createReplacementText(\"".$type."\")' title='Create a replacement text with all placeholders.'>Create replacement text</button>
+          <button class='btn btn-light' style='margin-top:25px;padding:15%;' onClick='createReplacementText(\"".$type."\")' title='Create a replacement text with all placeholders.'>Create replacement text</button>
         </div>
       </div>
     </td>
@@ -106,9 +107,9 @@ abstract class HistogramBase extends FO_Plugin
   </tr></table>
     <div class='form-group'>
       <div class='col-sm-offset-2 col-sm-10'>
-        <button class='btn btn-default' id='testReplacement".$type."'>Test replacement</button>
-        <button class='btn btn-default' id='replaceSelected".$type."'>Replace selected rows</button>
-        <button class='btn btn-default' id='deleteSelected".$type."'>Deactivate selected rows</button>
+        <button class='btn btn-light' id='testReplacement".$type."'>Test replacement</button>
+        <button class='btn btn-light' id='replaceSelected".$type."'>Replace selected rows</button>
+        <button class='btn btn-light' id='deleteSelected".$type."'>Deactivate selected rows</button>
       </div>
     </div>
   <br /><br />
@@ -118,7 +119,7 @@ abstract class HistogramBase extends FO_Plugin
   </table>
   <br/><br/>
   <h4>Deactivated $typeDescriptor statements:</h4>
-  <div class='btn btn-default' style='float:right; padding:5px; margin:5px;'>
+  <div class='btn btn-light' style='float:right; padding:5px; margin:5px;'>
   <input type='checkbox' id='inverseSearchDeactivated".$type."' name='inverseSearch'/> 
   <label class='control-label' for='inverseSearchDeactivated".$type."'>Inverse Search</label>
   </div>
@@ -229,9 +230,11 @@ abstract class HistogramBase extends FO_Plugin
     /* advanced interface allowing user to select dataset (agent version) */
     $dataset = $this->agentName."_dataset";
     $arsCopyrighttable = $this->agentName."_ars";
+    $additionalArsCopyrighttable = $this->additionalAgentName."_ars";
     /* get proper agent_id */
 
     $agentId[] = LatestAgentpk($uploadId, $arsCopyrighttable);
+    $additionalAgentId[] = LatestAgentpk($uploadId, $additionalArsCopyrighttable);
     if ($this->agentName == "copyright") {
       $arsResotable = "reso_ars";
       // $agentId[] = LatestAgentpk($uploadId, $arsResotable);
@@ -240,7 +243,7 @@ abstract class HistogramBase extends FO_Plugin
       }
     }
 
-    if (empty($agentId) || $agentId[0] == 0) {
+    if ((empty($agentId) || $agentId[0] == 0) && (empty($additionalAgentId) || $additionalAgentId[0] == 0)) {
       /* schedule copyright */
       $OutBuf .= ActiveHTTPscript("Schedule");
       $OutBuf .= "<script language='javascript'>\n";
@@ -254,7 +257,7 @@ abstract class HistogramBase extends FO_Plugin
       $OutBuf .= "<form name='formy' method='post'>\n";
       $OutBuf .= "<div id='msgdiv'>\n";
       $OutBuf .= _("No data available.");
-      $OutBuf .= "<input type='button' class='btn btn-default btn-sm' name='scheduleAgent' value='Schedule Agent'";
+      $OutBuf .= "<input type='button' class='btn btn-light btn-sm' name='scheduleAgent' value='Schedule Agent'";
       $OutBuf .= "onClick=\"Schedule_Get('" . Traceback_uri() . "?mod=schedule_agent&upload=$uploadId&agent=agent_{$this->agentName}')\">\n";
       $OutBuf .= "</input>";
       $OutBuf .= "</div> \n";

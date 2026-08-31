@@ -292,9 +292,19 @@ if (version_compare($release, '4.3.0', '<')) {
   Migrate_42_43($Verbose);
 }
 
+require_once("$LIBEXECDIR/dbmigrate_cmu-mach.php");
+Migrate_Cmu_Mach($dbManager, $Verbose);
+
 /* initialize the license_ref table */
 if ($UpdateLiceneseRef)
 {
+  if (version_compare($release, '4.8.0', '<')) {
+    /* Normalize legacy all-caps values before per-license update runs. */
+    $dbManager->queryOnce(
+      "UPDATE license_ref SET rf_licensetype='Unknown'
+         WHERE rf_licensetype IN ('UNKNOWN', 'PERMISSIVE')",
+      'migrate.rf_licensetype.case');
+  }
   $row = $dbManager->getSingleRow("SELECT count(*) FROM license_ref",array(),'license_ref.count');
   if ($row['count'] >  0) {
     print "Update reference licenses\n";
@@ -388,13 +398,18 @@ if($isUpdating && (empty($sysconfig['Release']) || $sysconfig['Release'] == "3.1
   $sysconfig['Release'] = "3.3.0";
 }
 
-$dbManager->begin();
-$dbManager->getSingleRow("DELETE FROM sysconfig WHERE variablename=$1",array('Release'),'drop.sysconfig.release');
-$dbManager->insertTableRow('sysconfig',
-  array('variablename'=>'Release','conf_value'=>$SysConf["BUILD"]["VERSION"],
-  'ui_label'=>'Release','vartype'=>2,'group_name'=>'Release','description'=>'')
-);
-$dbManager->commit();
+// Handle idempotency of this script by checking if the Release variable is set
+$new_version = $SysConf["BUILD"]["VERSION"] ?? '';
+if ($new_version !==''){
+  $dbManager->begin();
+  $dbManager->getSingleRow("DELETE FROM sysconfig WHERE variablename=$1",array('Release'),'drop.sysconfig.release');
+  $dbManager->insertTableRow('sysconfig',
+    array('variablename'=>'Release','conf_value'=>$SysConf["BUILD"]["VERSION"],
+    'ui_label'=>'Release','vartype'=>2,'group_name'=>'Release','description'=>'')
+  );
+  $dbManager->commit();
+}
+
 /* email/url/author data migration to other table */
 require_once("$LIBEXECDIR/dbmigrate_copyright-author.php");
 
@@ -421,6 +436,15 @@ createCopyrightMigrationForCopyrightEvents($dbManager);
 require_once ("$LIBEXECDIR/sanity_check.php");
 $checker = new SanityChecker($dbManager,$Verbose);
 $errors = $checker->check();
+
+require_once("$LIBEXECDIR/dbmigrate_licensedb_compatibility.php");
+LicenseDB_compatibility_migration();
+
+require_once("$LIBEXECDIR/dbmigrate_token.php");
+Token_timestamp_migration();
+
+require_once("$LIBEXECDIR/dbmigrate_kotoba_candidate_licenses.php");
+Kotoba_candidate_license_migration();
 
 if($errors>0)
 {
@@ -458,7 +482,67 @@ if (! empty($FAILED_LICENSE_IMPORT)) {
     }, $failedPromote)) . "\n";
   }
 }
+updateLicenseTypesConfig();
 exit($errors);
+
+/** \brief Append new rf_licensetype values found in license_ref to the LicenseTypes sysconfig entry. */
+function updateLicenseTypesConfig()
+{
+  global $dbManager;
+
+  $rows = $dbManager->getRows(
+    "SELECT DISTINCT rf_licensetype FROM license_ref
+     WHERE rf_licensetype IS NOT NULL AND rf_licensetype <> ''
+     ORDER BY rf_licensetype",
+    array(), 'updateLicenseTypesConfig.fetchTypes');
+
+  if (empty($rows)) {
+    return;
+  }
+  $dbTypes = array();
+  foreach ($rows as $row) {
+    $dbTypes[$row['rf_licensetype']] = true;
+  }
+
+  $confRow = $dbManager->getSingleRow(
+    "SELECT conf_value FROM sysconfig WHERE variablename=$1",
+    array('LicenseTypes'), 'updateLicenseTypesConfig.fetchConf');
+
+  if ($confRow === false || $confRow === null) {
+    return;
+  }
+
+  $existingTypes = array();
+  $existingTypesLower = array();
+  if (!empty($confRow['conf_value'])) {
+    foreach (explode(',', $confRow['conf_value']) as $t) {
+      $trimmed = trim($t);
+      if ($trimmed !== '') {
+        $existingTypes[$trimmed] = true;
+        $existingTypesLower[strtolower($trimmed)] = true;
+      }
+    }
+  }
+
+  $newTypes = array();
+  foreach ($dbTypes as $type => $_) {
+    if (!isset($existingTypesLower[strtolower($type)])) {
+      $newTypes[] = $type;
+    }
+  }
+  if (empty($newTypes)) {
+    return;
+  }
+
+  $merged = array_merge(array_keys($existingTypes), $newTypes);
+  $newValue = implode(', ', $merged);
+
+  $dbManager->getRows(
+    "UPDATE sysconfig SET conf_value=$1 WHERE variablename=$2",
+    array($newValue, 'LicenseTypes'), 'updateLicenseTypesConfig.update');
+
+  print "LicenseTypes updated: $newValue\n";
+}
 
 /**
  * \brief insert into license_ref table using json file.
@@ -475,8 +559,7 @@ function insertInToLicenseRefTableUsingJson($tableName)
     return (1);
   }
 
-  $dir = opendir($LIBEXECDIR);
-  if (!$dir) {
+  if (!is_readable($LIBEXECDIR)) {
     print "FATAL: Unable to access '$LIBEXECDIR'.\n";
     return (1);
   }
@@ -503,7 +586,6 @@ function insertInToLicenseRefTableUsingJson($tableName)
   ];
 
   $jsonData = json_decode(file_get_contents("$LIBEXECDIR/licenseRef.json"), true);
-  $statementName = __METHOD__.'.insertInTo'.$tableName;
   foreach($jsonData as $licenseArray) {
     foreach ($keysToReplicate as $duplicateKey => $originalKey) {
       if ($licenseArray['rf_spdx_compatible'] == 't') {
@@ -519,6 +601,7 @@ function insertInToLicenseRefTableUsingJson($tableName)
     $arrayKeys = array_keys($licenseArray);
     $arrayValues = array_values($licenseArray);
     $keys = strtr(implode(",", $arrayKeys), $keysToBeChanged);
+    $statementName = __METHOD__ . '.insertInTo' . $tableName . '.' . md5($tableName . $keys);
     $valuePlaceHolders = "$" . join(",$",range(1, count($arrayKeys)));
     $md5PlaceHolder = "$". (count($arrayKeys) + 1);
     $arrayValues[] = $licenseArray['rf_text'];
@@ -571,6 +654,7 @@ function initLicenseRefTable($Verbose)
     $rf_detector_type = $row['rf_detector_type'];
     $rf_flag = $row['rf_flag'];
     $rf_spdx_id = $row['rf_spdx_id'];
+    $rf_licensetype = $row['rf_licensetype'];
 
     if ($count) // update when it is existing
     {
@@ -587,6 +671,7 @@ function initLicenseRefTable($Verbose)
       $rf_detector_type_check = $row_check['rf_detector_type'];
       $rf_flag_check = $row_check['rf_flag'];
       $rf_spdx_id_check = $row_check['rf_spdx_id'];
+      $rf_licensetype_check = $row_check['rf_licensetype'];
 
       $candidateLicense = isLicenseExists($dbManager, $rf_shortname, true);
       if ($candidateLicense) {
@@ -597,7 +682,8 @@ function initLicenseRefTable($Verbose)
       $sql = "UPDATE license_ref SET ";
       if (($rf_flag_check == 1 && $rf_flag == 1) &&
           ($rf_text_check != $rf_text && !empty($rf_text) &&
-          !(stristr($rf_text, 'License by Nomos')))) {
+          !(stristr($rf_text, 'License by Nomos')) &&
+          !(stristr($rf_text, 'License by OJO')))) {
         $params[] = $rf_text;
         $position = "$" . count($params);
         $sql .= "rf_text=$position,rf_md5=md5($position),rf_flag=1,";
@@ -652,6 +738,12 @@ function initLicenseRefTable($Verbose)
         $sql .= "rf_spdx_id=$position,";
         $statement .= ".spdxId";
       }
+      if (!empty($rf_licensetype) && $rf_licensetype_check != $rf_licensetype) {
+        $params[] = $rf_licensetype;
+        $position = "$" . count($params);
+        $sql .= "rf_licensetype=$position,";
+        $statement .= ".licType";
+      }
       $sql = substr_replace($sql, "", -1);
 
       if ($sql != "UPDATE license_ref SET") { // check if we have something to update
@@ -678,6 +770,7 @@ function initLicenseRefTable($Verbose)
       $params['rf_detector_type'] = $rf_detector_type;
       $params['marydone'] = $marydone;
       $params['rf_spdx_id'] = $rf_spdx_id;
+      $params['rf_licensetype'] = $rf_licensetype;
       insertNewLicense($dbManager, $params);
     }
   }
@@ -791,8 +884,8 @@ function insertNewLicense($dbManager, $license, $wasCandidate = false)
     $insertStatement .= ".wasCandidate";
   }
   $sql .= "rf_shortname, rf_text, rf_url, rf_fullname, rf_notes, rf_active, " .
-    "rf_text_updatable, rf_detector_type, marydone, rf_spdx_id, rf_md5, " .
-    "rf_add_date) VALUES (";
+    "rf_text_updatable, rf_detector_type, marydone, rf_spdx_id, rf_licensetype, " .
+    "rf_md5, rf_add_date) VALUES (";
   $params = array();
   if ($wasCandidate) {
     $params[] = $license['rf_pk'];
@@ -807,6 +900,7 @@ function insertNewLicense($dbManager, $license, $wasCandidate = false)
   $params[] = $license['rf_detector_type'];
   $params[] = $license['marydone'];
   $params[] = $license['rf_spdx_id'];
+  $params[] = !empty($license['rf_licensetype']) ? $license['rf_licensetype'] : 'Unknown';
 
   for ($i = 1; $i <= count($params); $i++) {
     $sql .= "$" . $i . ",";

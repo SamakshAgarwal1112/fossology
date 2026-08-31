@@ -1,6 +1,7 @@
 <?php
 /*
  SPDX-FileCopyrightText: © 2014-2018, 2020-2022 Siemens AG
+ SPDX-FileCopyrightText: © Fossology contributors
  Author: Johannes Najjar
 
  SPDX-License-Identifier: GPL-2.0-only
@@ -69,7 +70,7 @@ class ClearingDao
     }
 
     $filterClause = $onlyCurrent ? "DISTINCT ON(itemid)" : "";
-    $sortClause = $onlyCurrent ? "ORDER BY itemid, scope, id DESC" : "";
+    $sortClause = $onlyCurrent ? "ORDER BY itemid, id DESC" : "";
 
     $statementName .= "." . $uploadTreeTable . ($onlyCurrent ? ".current": "");
 
@@ -184,7 +185,7 @@ class ClearingDao
   {
     $this->dbManager->begin();
 
-    $statementName = __METHOD__;
+    $statementName = __METHOD__ . ($includeSubFolders ? ".subfolders" : ".direct");
 
     if (!$includeSubFolders) {
       $params = array($itemTreeBounds->getItemId());
@@ -231,7 +232,7 @@ class ClearingDao
             LEFT JOIN clearing_decision_event cde ON cde.clearing_decision_fk = decision.id
             LEFT JOIN clearing_event ce ON ce.clearing_event_pk = cde.clearing_event_fk
             LEFT JOIN license_ref lr ON lr.rf_pk = ce.rf_fk
-            ORDER BY decision.id DESC, event_id ASC";
+            ORDER BY decision.id DESC, itemid, event_id ASC";
 
     $this->dbManager->prepare($statementName, $sql);
 
@@ -261,7 +262,7 @@ class ClearingDao
       $reportInfo = $row['reportinfo'];
       $acknowledgement = $row['acknowledgement'];
 
-      if ($clearingId !== $previousClearingId && $itemId !== $previousItemId) {
+      if ($clearingId !== $previousClearingId || $itemId !== $previousItemId) {
         //store the old one
         if (!$firstMatch) {
           $clearingsWithLicensesArray[] = $clearingDecisionBuilder->setClearingEvents($clearingEvents)->build();
@@ -269,11 +270,8 @@ class ClearingDao
 
         $firstMatch = false;
         //prepare the new one
-        if ($forClearingHistory) {
-          $previousClearingId = $clearingId;
-        } else {
-          $previousItemId = $itemId;
-        }
+        $previousClearingId = $clearingId;
+        $previousItemId = $itemId;
         $clearingEvents = array();
         $clearingDecisionBuilder = ClearingDecisionBuilder::create()
             ->setClearingId($row['id'])
@@ -372,7 +370,7 @@ INSERT INTO clearing_decision (
   scope
 ) VALUES (
   $1,
-  (SELECT pfile_fk FROM uploadtree WHERE uploadtree_pk=$1),
+  (SELECT pfile_fk FROM ". $uploadTreeTable ." WHERE uploadtree_pk=$1),
   $2,
   $3,
   $4,
@@ -665,29 +663,30 @@ INSERT INTO clearing_decision (
       $stmt .= ".tried";
     }
 
-    $sql = "WITH alltried AS (
-            SELECT lr.lrb_pk, ce.clearing_event_pk ce_pk, lr.rf_text, ce.uploadtree_fk,
-              $triedExpr AS tried
+    $sql = "WITH relevant_bulks AS MATERIALIZED (
+            SELECT lr.lrb_pk, $triedExpr AS tried
             FROM license_ref_bulk lr
-              LEFT JOIN highlight_bulk h ON lrb_fk = lrb_pk
-              LEFT JOIN clearing_event ce ON ce.clearing_event_pk = h.clearing_event_fk
-              LEFT JOIN $uploadTreeTableName ut ON ut.uploadtree_pk = ce.uploadtree_fk
               INNER JOIN $uploadTreeTableName ut2 ON ut2.uploadtree_pk = lr.uploadtree_fk
             WHERE ut2.upload_fk = $1 AND lr.group_fk = $4
               $triedFilter
-              ORDER BY lr.lrb_pk
+            ), alltried AS (
+            SELECT rb.lrb_pk, ce.clearing_event_pk ce_pk, ce.uploadtree_fk, rb.tried
+            FROM relevant_bulks rb
+              LEFT JOIN highlight_bulk h ON h.lrb_fk = rb.lrb_pk
+              LEFT JOIN clearing_event ce ON ce.clearing_event_pk = h.clearing_event_fk
             ), aggregated_tried AS (
-            SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, rf_text AS text, tried, matched
+            SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, tried, matched
             FROM (
-              SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, rf_text, tried, true AS matched FROM alltried WHERE uploadtree_fk = $2
+              SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, tried, true AS matched FROM alltried WHERE uploadtree_fk = $2
               UNION ALL
-              SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, rf_text, tried, false AS matched FROM alltried WHERE uploadtree_fk != $2 OR uploadtree_fk IS NULL
+              SELECT DISTINCT ON(lrb_pk) lrb_pk, ce_pk, tried, false AS matched FROM alltried WHERE uploadtree_fk != $2 OR uploadtree_fk IS NULL
             ) AS result ORDER BY lrb_pk, matched DESC)
-            SELECT lrb_pk, text, rf_shortname, removing, tried, ce_pk, matched
-            FROM aggregated_tried
-              INNER JOIN license_set_bulk lsb ON lsb.lrb_fk = lrb_pk
+            SELECT a.lrb_pk, lr.rf_text AS text, lrf.rf_shortname, lsb.removing, a.tried, a.ce_pk, a.matched
+            FROM aggregated_tried a
+              INNER JOIN license_set_bulk lsb ON lsb.lrb_fk = a.lrb_pk
               INNER JOIN license_ref lrf ON lsb.rf_fk = lrf.rf_pk
-            ORDER BY lrb_pk";
+              INNER JOIN license_ref_bulk lr ON lr.lrb_pk = a.lrb_pk
+            ORDER BY a.lrb_pk";
 
     $this->dbManager->prepare($stmt, $sql);
     $res = $this->dbManager->execute($stmt, $params);
@@ -729,6 +728,113 @@ INSERT INTO clearing_decision (
     $result = $this->dbManager->fetchAll($res);
     $this->dbManager->freeResult($res);
     return $result;
+  }
+
+  /**
+   * @param ItemTreeBounds $itemTreeBound
+   * @param int $groupId
+   * @return boolean True if file has kotoba findings, false otherwise
+   */
+  public function hasKotobaFindings(ItemTreeBounds $itemTreeBound, $groupId)
+  {
+    $uploadTreeTableName = $itemTreeBound->getUploadTreeTableName();
+    $uploadId = $itemTreeBound->getUploadId();
+    $left = $itemTreeBound->getLeft();
+    $right = $itemTreeBound->getRight();
+
+    $stmt = __METHOD__ . "." . $uploadTreeTableName;
+    $sql = "SELECT COUNT(*) FROM clearing_event ce
+            INNER JOIN $uploadTreeTableName ut ON ut.uploadtree_pk = ce.uploadtree_fk
+            WHERE ce.type_fk = " . ClearingEventTypes::KOTOBA . "
+            AND ce.group_fk = $1
+            AND ut.upload_fk = $2
+            AND ut.lft BETWEEN $3 AND $4";
+
+    $this->dbManager->prepare($stmt, $sql);
+    $res = $this->dbManager->execute($stmt, array($groupId, $uploadId, $left, $right));
+    $row = $this->dbManager->fetchArray($res);
+    $this->dbManager->freeResult($res);
+
+    return ($row && intval($row['count']) > 0);
+  }
+
+  /**
+   * @param ItemTreeBounds $itemTreeBound
+   * @param int $groupId
+   * @param boolean $onlyTried
+   * @return array[] where array has keys ("phraseId","id","text","matched","tried","removedLicenses","addedLicenses")
+   */
+  public function getKotobaHistory(ItemTreeBounds $itemTreeBound, $groupId, $onlyTried = true)
+  {
+    $uploadTreeTableName = $itemTreeBound->getUploadTreeTableName();
+    $itemId = $itemTreeBound->getItemId();
+    $uploadId = $itemTreeBound->getUploadId();
+    $left = $itemTreeBound->getLeft();
+    $right = $itemTreeBound->getRight();
+
+    $params = array($uploadId, $itemId, $left, $right, $groupId);
+    $stmt = __METHOD__ . "." . $uploadTreeTableName;
+
+    $triedExpr = "ut.lft BETWEEN $3 AND $4";
+    $triedFilter = "";
+    if ($onlyTried) {
+      $triedFilter = "AND " . $triedExpr;
+      $stmt .= ".tried";
+    }
+
+    // Group by cp_fk, not reportinfo: reportinfo is per-mapping metadata,
+    // empty for a "remove" mapping, so it is not a stable phrase identity.
+    $kotobaType = ClearingEventTypes::KOTOBA;
+    $sql = "WITH alltried AS (
+            SELECT h.cp_fk, ce.clearing_event_pk ce_pk, ce.uploadtree_fk,
+              $triedExpr AS tried
+            FROM clearing_event ce
+              INNER JOIN highlight_kotoba h ON h.clearing_event_fk = ce.clearing_event_pk
+              INNER JOIN $uploadTreeTableName ut ON ut.uploadtree_pk = ce.uploadtree_fk
+            WHERE ce.type_fk = $kotobaType
+            AND ce.group_fk = $5
+            AND ut.upload_fk = $1
+            $triedFilter
+            ORDER BY h.cp_fk, ce.clearing_event_pk
+            ), aggregated_tried AS (
+            SELECT DISTINCT ON(cp_fk) cp_fk, ce_pk, tried, matched
+            FROM (
+              SELECT DISTINCT ON(cp_fk) cp_fk, ce_pk, tried, true AS matched FROM alltried WHERE uploadtree_fk = $2
+              UNION ALL
+              SELECT DISTINCT ON(cp_fk) cp_fk, ce_pk, tried, false AS matched FROM alltried WHERE uploadtree_fk != $2 OR uploadtree_fk IS NULL
+            ) AS result ORDER BY cp_fk, matched DESC)
+            SELECT a.cp_fk, cp.text, lrf.rf_shortname, cplm.removing, a.tried, a.ce_pk, a.matched
+            FROM aggregated_tried a
+              INNER JOIN custom_phrase cp ON cp.cp_pk = a.cp_fk
+              INNER JOIN custom_phrase_license_map cplm ON cplm.cp_fk = a.cp_fk
+              INNER JOIN license_ref lrf ON cplm.rf_fk = lrf.rf_pk
+            ORDER BY a.cp_fk";
+
+    $this->dbManager->prepare($stmt, $sql);
+    $res = $this->dbManager->execute($stmt, $params);
+
+    $phrases = array();
+    while ($row = $this->dbManager->fetchArray($res)) {
+      $phraseId = $row['cp_fk'];
+
+      if (!array_key_exists($phraseId, $phrases)) {
+        $phrases[$phraseId] = array(
+            "phraseId" => $phraseId,
+            "id" => $row['ce_pk'],
+            "text" => $row['text'],
+            "matched" => $this->dbManager->booleanFromDb($row['matched']),
+            "tried" => $this->dbManager->booleanFromDb($row['tried']),
+            "removedLicenses" => array(),
+            "addedLicenses" => array());
+      }
+      $key = $this->dbManager->booleanFromDb($row['removing']) ? 'removedLicenses' : 'addedLicenses';
+      if (!in_array($row['rf_shortname'], $phrases[$phraseId][$key])) {
+        $phrases[$phraseId][$key][] = $row['rf_shortname'];
+      }
+    }
+
+    $this->dbManager->freeResult($res);
+    return $phrases;
   }
 
   /**
@@ -822,13 +928,16 @@ INSERT INTO clearing_decision (
     $params = array($itemTreeBounds->getLeft(), $itemTreeBounds->getRight());
     $params[] = $groupId;
     $a = count($params);
-    $options = array(UploadTreeProxy::OPT_SKIP_THESE=>'noLicense',
-                     UploadTreeProxy::OPT_ITEM_FILTER=>' AND (lft BETWEEN $1 AND $2)',
-                     UploadTreeProxy::OPT_GROUP_ID=>'$'.$a);
+
+    $options = array(
+      UploadTreeProxy::OPT_SKIP_THESE => 'nolicensenocopyright',
+      UploadTreeProxy::OPT_ITEM_FILTER => ' AND (lft BETWEEN $1 AND $2)',
+      UploadTreeProxy::OPT_GROUP_ID => '$' . $a
+    );
     $uploadTreeProxy = new UploadTreeProxy($itemTreeBounds->getUploadId(), $options, $itemTreeBounds->getUploadTreeTableName());
     if (!$removeDecision) {
       $sql = $uploadTreeProxy->asCTE() .
-        ' SELECT uploadtree_pk FROM UploadTreeView;';
+        ' SELECT uploadtree_pk, upload_fk, lft, rgt FROM UploadTreeView;';
       $itemRows = $this->dbManager->getRows($sql, $params,
         __METHOD__ . ".getRevelantItems");
       $uploadTreeTableName = $itemTreeBounds->getUploadTreeTableName();
@@ -836,8 +945,9 @@ INSERT INTO clearing_decision (
       $clearingDecisionEventProcessor = $GLOBALS['container']->get(
         'businessrules.clearing_decision_processor');
       foreach ($itemRows as $itemRow) {
-        $itemBounds = $this->uploadDao->getItemTreeBounds(
-          $itemRow['uploadtree_pk'], $uploadTreeTableName);
+        $itemBounds = new ItemTreeBounds(
+          $itemRow['uploadtree_pk'], $uploadTreeTableName,
+          $itemRow['upload_fk'], $itemRow['lft'], $itemRow['rgt']);
         $clearingDecisionEventProcessor->makeDecisionFromLastEvents(
           $itemBounds, $userId, $groupId, $decisionMark, DecisionScopes::ITEM);
       }
@@ -896,6 +1006,38 @@ INSERT INTO clearing_decision (
     }
     $this->dbManager->freeResult($res);
     return $ids;
+  }
+
+  /**
+   * Fetch custom license texts (reportinfo) for main licenses of an upload.
+   *
+   * @param int $uploadId
+   * @param int $groupId
+   * @return array<int,string> license_id => reportinfo text
+   */
+  public function getMainLicenseReportInfos($uploadId, $groupId)
+  {
+    $uploadTreeTableName = $this->uploadDao->getUploadtreeTableName($uploadId);
+    $statementName = __METHOD__;
+    $sql = "SELECT DISTINCT ON (ce.rf_fk)
+              ce.rf_fk AS license_id,
+              ce.reportinfo
+            FROM $uploadTreeTableName ut
+            INNER JOIN clearing_event ce ON ce.uploadtree_fk = ut.uploadtree_pk
+            WHERE ut.upload_fk = \$1
+              AND ce.group_fk = \$2
+              AND NOT ce.removed
+              AND ce.reportinfo IS NOT NULL
+              AND ce.reportinfo <> ''
+            ORDER BY ce.rf_fk, ce.date_added DESC, ce.clearing_event_pk DESC";
+    $this->dbManager->prepare($statementName, $sql);
+    $result = $this->dbManager->execute($statementName, array($uploadId, $groupId));
+    $reportInfos = array();
+    while ($row = $this->dbManager->fetchArray($result)) {
+      $reportInfos[intval($row['license_id'])] = $row['reportinfo'];
+    }
+    $this->dbManager->freeResult($result);
+    return $reportInfos;
   }
 
   /**
@@ -1030,7 +1172,7 @@ INSERT INTO clearing_decision (
              UPDATE clearing_decision SET scope = $2 WHERE clearing_decision_pk IN (
                SELECT clearing_decision_pk FROM latestDecisions) RETURNING clearing_decision_pk";
 
-    $countUpdated = $this->dbManager->getSingleRow($sql,
+    $countUpdated = $this->dbManager->getRows($sql,
                  array($uploadId, DecisionScopes::REPO), $statementName);
 
     return count($countUpdated);

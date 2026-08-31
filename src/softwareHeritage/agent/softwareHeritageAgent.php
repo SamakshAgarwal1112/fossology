@@ -16,7 +16,7 @@ use Fossology\Lib\Dao\LicenseDao;
 use Fossology\Lib\Dao\SoftwareHeritageDao;
 use Fossology\Lib\Dao\UploadDao;
 use Fossology\Lib\Db\DbManager;
-use \GuzzleHttp\Client;
+use Fossology\Lib\Util\HttpUtils;
 use GuzzleHttp\Psr7;
 use GuzzleHttp\Exception\RequestException;
 
@@ -86,32 +86,7 @@ class softwareHeritageAgent extends Agent
       'token' => trim($sysconfig['SwhToken'])
     ];
 
-    $proxy = [];
-    if (array_key_exists('http_proxy', $SysConf['FOSSOLOGY']) &&
-      ! empty($SysConf['FOSSOLOGY']['http_proxy'])) {
-      $proxy['http'] = $SysConf['FOSSOLOGY']['http_proxy'];
-    }
-    if (array_key_exists('https_proxy', $SysConf['FOSSOLOGY']) &&
-      ! empty($SysConf['FOSSOLOGY']['https_proxy'])) {
-      $proxy['https'] = $SysConf['FOSSOLOGY']['https_proxy'];
-    }
-    if (array_key_exists('no_proxy', $SysConf['FOSSOLOGY']) &&
-      ! empty($SysConf['FOSSOLOGY']['no_proxy'])) {
-      $proxy['no'] = explode(',', $SysConf['FOSSOLOGY']['no_proxy']);
-    }
-
-    $version = $SysConf['BUILD']['VERSION'];
-    $headers = ['User-Agent' => "fossology/$version"];
-    if (!empty($this->configuration['token'])) {
-      $headers['Authorization'] = 'Bearer ' . $this->configuration['token'];
-    }
-
-    $this->guzzleClient = new Client([
-      'http_errors' => false,
-      'proxy' => $proxy,
-      'base_uri' => $this->configuration['url'],
-      'headers' => $headers
-    ]);
+    $this->guzzleClient = HttpUtils::getGuzzleClient($SysConf, $this->configuration['url'], $this->configuration['token']);
   }
 
   /**
@@ -154,8 +129,10 @@ class softwareHeritageAgent extends Agent
       print "INFO :Software Heritage X-RateLimit-Limit reached. Next slot unlocks in ".gmdate("H:i:s", $timeToReset)."\n";
       if ($timeToReset > $maxTime) {
         sleep($maxTime);
-      } else {
+      } elseif ($timeToReset > 0) {
         sleep($timeToReset);
+      } else {
+        sleep(min($maxTime, 60));
       }
       $this->processEachPfileForSWH($pfileDetail, $agentId, $maxTime);
     } else {
@@ -183,10 +160,19 @@ class softwareHeritageAgent extends Agent
       $cookedResult = array();
       if ($statusCode == SoftwareHeritageDao::SWH_STATUS_OK) {
         $responseContent = json_decode($response->getBody()->getContents(),true);
-        $cookedResult = $responseContent["facts"][0]["licenses"];
+        if (isset($responseContent["facts"]) && !empty($responseContent["facts"]) &&
+            isset($responseContent["facts"][0]["licenses"])) {
+          $cookedResult = $responseContent["facts"][0]["licenses"];
+        } else {
+          $cookedResult = array();
+        }
       } else if ($statusCode == SoftwareHeritageDao::SWH_RATELIMIT_EXCEED) {
         $responseContent = $response->getHeaders();
-        $cookedResult = $responseContent["X-RateLimit-Reset"][0];
+        if (isset($responseContent["X-RateLimit-Reset"][0])) {
+          $cookedResult = $responseContent["X-RateLimit-Reset"][0];
+        } else {
+          $cookedResult = time() + $this->configuration['maxtime'];
+        }
       } else if ($statusCode == SoftwareHeritageDao::SWH_NOT_FOUND) {
         $response = $this->guzzleClient->get($URIToGetContent);
         $responseContent = json_decode($response->getBody(),true);

@@ -43,15 +43,15 @@ class search extends FO_Plugin
 
   function loadUploads()
   {
-    $allUploadsPre = $this->uploadDao->getActiveUploadsArray();
-    $filteredUploadsList = array();
+    if (Auth::isAdmin()) {
+      return $this->uploadDao->getActiveUploadsArray();
+    }
 
-    return array_filter($allUploadsPre, function($uploadObj){
-      if ($this->uploadDao->isAccessible($uploadObj->getId(), Auth::getGroupId())) {
-        return true;
-      }
-      return false;
-    });
+    if (Auth::getUserId() === 0) {
+      return array();
+    }
+
+    return $this->uploadDao->getAccessibleUploads(Auth::getGroupId());
   }
 
   /**
@@ -203,8 +203,16 @@ class search extends FO_Plugin
       $this->vars["Copyright"] = $Copyright;
     }
 
-    $Limit = GetParm("limit",PARM_INTEGER);
-    $Page = GetParm("page",PARM_INTEGER);
+    $Limit = GetParm("limit", PARM_INTEGER);
+    if (!empty($Limit)) {
+      $GETvars .= "&limit=" . urlencode($Limit);
+      $this->MaxPerPage = $Limit;
+    }
+
+    $Page = GetParm("page", PARM_INTEGER);
+    if (!empty($Page)) {
+      $GETvars .= "&page=" . urlencode($Page);
+    }
 
     $this->vars["postUrl"] = Traceback_uri() . "?mod=" . self::getName();
 
@@ -212,7 +220,7 @@ class search extends FO_Plugin
       if (empty($Page)) {
         $Page = 0;
       }
-      $UploadtreeRecsResult = $this->searchHelperDao->GetResults($Item, $Filename,$Upload, $tag, $Page, $Limit, $SizeMin,
+      $UploadtreeRecsResult = $this->searchHelperDao->GetResults($Item, $Filename, $Upload, $tag, $Page, $Limit, $SizeMin,
         $SizeMax, $searchtype, $License, $Copyright, $this->uploadDao,
         Auth::getGroupId());
       $html = "<hr>\n";
@@ -221,8 +229,7 @@ class search extends FO_Plugin
       $html .= "<H4>$message</H4>\n";
       $text = $UploadtreeRecsResult[1] . " " . _("Files matching");
       $html .= "<H2>$text " . htmlentities($Filename) . " in ". htmlentities($SelectedUploadName) . "</H2>\n";
-      $html .= $this->HTMLResults($UploadtreeRecsResult[0], $Page, $GETvars,
-        $License, $Copyright);
+      $html .= $this->HTMLResults($UploadtreeRecsResult[0], $Page, $GETvars);
       $this->vars["result"] = $html;
     }
   }

@@ -4,6 +4,7 @@
 # SPDX-FileCopyrightText: © mishra.gaurav@siemens.com
 # SPDX-FileCopyrightText: © 2016-2017 TNG Technology Consulting GmbH
 # SPDX-FileCopyrightText: © maximilian.huber@tngtech.com
+# SPDX-FileCopyrightText: © kaushlendra-pratap.singh@siemens.com
 #
 # SPDX-License-Identifier: FSFAP
 #
@@ -41,14 +42,15 @@ COPY ./src/scancode/mod_deps ./src/scancode/
 COPY ./src/scheduler/mod_deps ./src/scheduler/
 COPY ./src/ununpack/mod_deps ./src/ununpack/
 COPY ./src/wget_agent/mod_deps ./src/wget_agent/
+COPY ./src/reuser/mod_deps ./src/reuser/
 COPY ./src/scanoss/mod_deps ./src/scanoss/
 
 RUN mkdir -p /fossology/dependencies-for-runtime \
  && cp -R /fossology/src /fossology/utils /fossology/dependencies-for-runtime/
 
 RUN DEBIAN_FRONTEND=noninteractive apt-get update \
- && DEBIAN_FRONTEND=noninteractive /fossology/utils/fo-installdeps --build -y \
- && DEBIAN_FRONTEND=noninteractive /fossology/install/fo-install-pythondeps --build -y \
+ && DEBIAN_FRONTEND=noninteractive /fossology/utils/fo-installdeps --buildtime -y \
+ && DEBIAN_FRONTEND=noninteractive /fossology/install/fo-install-pythondeps --buildtime -y \
  && rm -rf /var/lib/apt/lists/*
 
 COPY . .

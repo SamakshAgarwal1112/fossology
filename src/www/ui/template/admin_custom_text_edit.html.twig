@@ -1,0 +1,506 @@
+{# SPDX-FileCopyrightText: © 2025 Harshit Gandhi <gandhiharshit716@gmail.com>
+   SPDX-FileCopyrightText: © Fossology contributors
+
+   SPDX-License-Identifier: GPL-2.0-only
+#}
+{% extends "include/base.html.twig" %}
+
+{% block styles %}
+  {{ parent() }}
+  <style>
+    .badge-add { background-color: #28a745; color: #fff; }
+    .badge-rm  { background-color: #dc3545; color: #fff; }
+    #licenseQueueTable td, #licenseQueueTable th { vertical-align: middle; }
+    .meta-cell textarea { width: 100%; min-width: 160px; font-size: 0.8em; resize: vertical; }
+  </style>
+{% endblock %}
+
+{% block content %}
+
+<form method="post" id="customTextForm">
+  <input type="hidden" name="{{ updateParam }}" value="1">
+  {% if cp_pk %}<input type="hidden" name="cp_pk" value="{{ cp_pk }}">{% endif %}
+
+  <table>
+    {% if isEdit and created_date is not empty %}
+      <tr>
+        <td>{{ 'Created Date'|trans }}:</td>
+        <td><span>{{ created_date|e }}</span></td>
+      </tr>
+    {% endif %}
+
+    <tr>
+      <td valign="top">{{ 'Associated Licenses'|trans }}:</td>
+      <td>
+        <div class="d-flex mb-1" style="gap:10px;">
+          <div style="flex:1;">
+            <div class="small font-weight-bold text-success mb-1">
+              <img src="images/icons/add_16.png" alt="+"/> {{ 'Add License'|trans }}
+            </div>
+            <select id="addLicenseSelect" class="form-control form-control-sm">
+              <option value="">{{ '-- Select to add --'|trans }}</option>
+              {% for key, value in licenseOptions %}
+                {% if key != '' %}<option value="{{ key }}">{{ value|e }}</option>{% endif %}
+              {% endfor %}
+            </select>
+          </div>
+          <div style="flex:1;">
+            <div class="small font-weight-bold text-danger mb-1">
+              <img src="images/icons/remove_16.png" alt="-"/> {{ 'Remove License'|trans }}
+            </div>
+            <select id="removeLicenseSelect" class="form-control form-control-sm">
+              <option value="">{{ '-- Select to remove --'|trans }}</option>
+              {% for key, value in licenseOptions %}
+                {% if key != '' %}<option value="{{ key }}">{{ value|e }}</option>{% endif %}
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <table id="licenseQueueTable" class="semibordered" style="width: 100%;">
+          <thead>
+            <tr>
+              <th style="width: 8%;">{{ 'Action'|trans }}</th>
+              <th style="width: 18%;">{{ 'License'|trans }}</th>
+              <th style="width: 22%;">{{ 'License Text'|trans }}</th>
+              <th style="width: 22%;">{{ 'Acknowledgement'|trans }}</th>
+              <th style="width: 22%;">{{ 'Comment'|trans }}</th>
+              <th style="width: 8%;"></th>
+            </tr>
+          </thead>
+          <tbody id="licenseQueueTableBody"></tbody>
+        </table>
+        <input type="hidden" name="license_data" id="licenseDataInput" value=""/>
+        <br/>
+        <small class="text-muted">{{ 'Select from the left to add a license, or from the right to mark one for removal.'|trans }}</small>
+      </td>
+    </tr>
+
+    <tr>
+      <td valign="top">{{ 'Text'|trans }}:</td>
+      <td>
+        <textarea name="{{ textParam }}" id="textField" class="form-control" cols="120" rows="10" required>{{ text|e }}</textarea>
+        <div id="duplicateWarning" class="alert alert-warning mt-1 d-none" role="alert">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          {{ 'Warning: This text content may already exist in the database.'|trans }}
+        </div>
+      </td>
+    </tr>
+
+    <tr>
+      <td>{{ 'Active'|trans }}:</td>
+      <td>
+        <div class="custom-control custom-switch mt-1">
+          <input type="checkbox" class="custom-control-input" id="isActiveSwitch"
+                 name="{{ isActiveParam }}"
+                 {% if is_active is not defined or is_active %}checked{% endif %}/>
+          <label class="custom-control-label" for="isActiveSwitch"></label>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <div class="mt-2">
+    <button type="submit" class="btn btn-primary btn-sm mr-1">
+      {{ (isEdit ? 'Update' : 'Save')|trans }}
+    </button>
+    {% if not isEdit %}
+    <button type="button" class="btn btn-info btn-sm mr-1"
+            data-toggle="modal" data-target="#bulkDataModal">
+      {{ 'Pull from Bulk Data'|trans }}
+    </button>
+    {% endif %}
+    <a href="?mod=admin_custom_text_list" class="btn btn-secondary btn-sm">
+      {{ 'Cancel'|trans }}
+    </a>
+  </div>
+
+</form>
+
+<!-- Bootstrap Bulk Data Modal -->
+<div class="modal fade" id="bulkDataModal" tabindex="-1" role="dialog"
+     aria-labelledby="bulkDataModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl" role="document" style="max-width: 80%; width: 80%;">
+    <div class="modal-content">
+
+      <div class="modal-header py-2">
+        <h5 class="modal-title" id="bulkDataModalLabel">{{ 'Select Bulk Data to Import'|trans }}</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="{{ 'Close'|trans }}">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <div class="d-flex align-items-center mb-2">
+          <input type="text" id="bulkDataSearch" class="form-control form-control-sm mr-2"
+                 style="max-width: 280px;" placeholder="{{ 'Search bulk data...'|trans }}">
+          <label class="mb-0 mr-1 small">{{ 'Show'|trans }}</label>
+          <select id="bulkPageSizeSelect" class="form-control form-control-sm" style="width: auto;">
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+          </select>
+          <span class="ml-1 small text-muted">{{ 'entries'|trans }}</span>
+        </div>
+
+        <div style="max-height: 55vh; overflow-y: auto;">
+          <table class="semibordered" id="bulkDataTable" width="100%" cellpadding="5">
+            <thead>
+              <tr>
+                <th width="6%">{{ 'ID'|trans }}</th>
+                <th width="27%">{{ 'Text Preview'|trans }}</th>
+                <th width="17%">{{ 'Licenses'|trans }}</th>
+                <th width="17%">{{ 'Acknowledgement'|trans }}</th>
+                <th width="17%">{{ 'Comments'|trans }}</th>
+                <th width="10%">
+                  <div class="d-flex align-items-center" style="gap:4px;">
+                    <span class="text-nowrap">{{ 'User'|trans }}</span>
+                    <select id="bulkUserFilter" class="form-control form-control-sm" style="min-width:90px;">
+                    <option value="">{{ 'All Users'|trans }}</option>
+                    {% for userId, userName in bulkDataUsers %}
+                      <option value="{{ userId }}">{{ userName|e }}</option>
+                    {% endfor %}
+                  </select>
+                  </div>
+                </th>
+                <th width="6%"></th>
+              </tr>
+            </thead>
+            <tbody id="bulkDataTableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <span id="bulkPaginationInfo" class="text-muted small"></span>
+          <div class="btn-group btn-group-sm">
+            <button type="button" id="bulkPrevBtn" class="btn btn-outline-secondary" disabled>
+              &laquo; {{ 'Previous'|trans }}
+            </button>
+            <span id="bulkPageIndicator" class="btn btn-light disabled px-3 small"></span>
+            <button type="button" id="bulkNextBtn" class="btn btn-outline-secondary" disabled>
+              {{ 'Next'|trans }} &raquo;
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">{{ 'Close'|trans }}</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block foot %}
+  {{ parent() }}
+  <script type="text/javascript">
+    var bulkDataCache = [];
+    var duplicateCheckTimeout = null;
+    var licenseQueue = [];
+    var bulkCurrentPage  = 1;
+    var bulkPageSize     = 10;
+    var bulkTotalPages   = 0;
+    var bulkTotalRecords = 0;
+    var bulkSearchTerm   = '';
+    var bulkUserFk       = 0;
+    var bulkSearchTimeout = null;
+
+    function validateForm() {
+      if (licenseQueue.length === 0) {
+        alert('{{ "At least one license must be associated with the custom text."|trans }}');
+        return false;
+      }
+      return true;
+    }
+
+    $(document).ready(function() {
+      $('#customTextForm').on('submit', function(e) {
+        if (!validateForm()) { e.preventDefault(); }
+      });
+
+      $('#bulkUserFilter').select2({
+        placeholder: '{{ "All Users"|trans }}',
+        allowClear: true,
+        width: 'resolve'
+      });
+      $('#addLicenseSelect').select2({
+        placeholder: '{{ "-- Select to add --"|trans }}',
+        allowClear: true,
+        width: '100%'
+      });
+      $('#removeLicenseSelect').select2({
+        placeholder: '{{ "-- Select to remove --"|trans }}',
+        allowClear: true,
+        width: '100%'
+      });
+
+      {# also seeded when a rejected save redraws the form, where isEdit is false #}
+      {% if selectedLicenses is defined and selectedLicenses|length > 0 %}
+        {% for license in selectedLicenses %}
+          licenseQueue.push({
+            licenseId:       {{ license.rf_pk }},
+            licenseName:     '{{ license.rf_shortname|e('js') }}',
+            action:          {{ license.removing ? '"Remove"' : '"Add"' }},
+            reportinfo:      '{{ (license.reportinfo ?? '')|e('js') }}',
+            acknowledgement: '{{ (license.acknowledgement ?? '')|e('js') }}',
+            comment:         '{{ (license.comment ?? '')|e('js') }}'
+          });
+        {% endfor %}
+        updateLicenseQueue();
+      {% endif %}
+
+      $('#addLicenseSelect').on('change', function() { addLicense(); });
+      $('#removeLicenseSelect').on('change', function() { rmLicense(); });
+
+      $('#bulkDataSearch').on('keyup', function() {
+        clearTimeout(bulkSearchTimeout);
+        var self = this;
+        bulkSearchTimeout = setTimeout(function() {
+          bulkSearchTerm = $(self).val().trim();
+          bulkCurrentPage = 1;
+          loadBulkData();
+        }, 300);
+      });
+
+      $('#bulkPageSizeSelect').on('change', function() {
+        bulkPageSize = parseInt($(this).val(), 10) || 10;
+        bulkCurrentPage = 1;
+        loadBulkData();
+      });
+
+      $('#bulkUserFilter').on('change', function() {
+        bulkUserFk = parseInt($(this).val(), 10) || 0;
+        bulkCurrentPage = 1;
+        loadBulkData();
+      });
+
+      $('#bulkDataModal').on('show.bs.modal', function() {
+        bulkCurrentPage = 1;
+        bulkSearchTerm  = '';
+        bulkUserFk      = 0;
+        $('#bulkDataSearch').val('');
+        $('#bulkUserFilter').val('').trigger('change');
+        loadBulkData();
+      });
+
+      $('#bulkPrevBtn').on('click', function() {
+        if (bulkCurrentPage > 1) { bulkCurrentPage--; loadBulkData(); }
+      });
+      $('#bulkNextBtn').on('click', function() {
+        if (bulkCurrentPage < bulkTotalPages) { bulkCurrentPage++; loadBulkData(); }
+      });
+
+      $('#textField').on('input', function() {
+        clearTimeout(duplicateCheckTimeout);
+        duplicateCheckTimeout = setTimeout(checkForDuplicateText, 500);
+      });
+    });
+
+    function loadBulkData() {
+      var params = { page: bulkCurrentPage, limit: bulkPageSize };
+      if (bulkSearchTerm) { params.search = bulkSearchTerm; }
+      if (bulkUserFk > 0) { params.user_fk = bulkUserFk; }
+      $('#bulkDataTableBody').html('<tr><td colspan="7" class="text-center text-muted">{{ "Loading..."|trans }}</td></tr>');
+      $.ajax({
+        url: "?mod=admin_custom_text_list&action=get_bulk_data",
+        type: "GET", data: params, dataType: "json",
+        success: function(response) {
+          if (response.data !== undefined) {
+            bulkDataCache    = response.data;
+            bulkTotalRecords = response.totalRecords || 0;
+            bulkTotalPages   = response.totalPages   || 1;
+            bulkCurrentPage  = response.currentPage  || 1;
+            bulkPageSize     = response.pageSize      || 10;
+            displayBulkData(response.data);
+            updatePaginationControls();
+          } else { alert("{{ 'Error loading bulk data'|trans }}"); }
+        },
+        error: function(xhr, status, error) { alert("{{ 'Error loading bulk data:'|trans }} " + error); }
+      });
+    }
+
+    function trunc(str, n) { return str && str.length > n ? str.substring(0, n) + '\u2026' : (str || ''); }
+
+    // Built via DOM APIs, not string concatenation: full/text are free text
+    // submitted by any user with bulk-decision access.
+    function previewCell(full, previewLen) {
+      return $('<td>').append(
+        $('<span>').attr('title', full).text(trunc(full, previewLen))
+      );
+    }
+
+    function displayBulkData(data) {
+      var tbody = $('#bulkDataTableBody');
+      tbody.empty();
+      if (data.length === 0) {
+        tbody.append('<tr><td colspan="7" class="text-center text-muted">{{ "No bulk data found"|trans }}</td></tr>');
+        return;
+      }
+      $.each(data, function(i, item) {
+        var $row = $('<tr>');
+        $row.append($('<td>').text(item.lrb_pk));
+        $row.append(previewCell(item.bulk_reference_text || '', 80));
+        $row.append(previewCell(item.license_summary || '', 30));
+        $row.append(previewCell(item.acknowledgement_summary || '', 30));
+        $row.append(previewCell(item.comment_summary || '', 30));
+        $row.append($('<td>').text(item.created_by_user || ''));
+        $row.append(
+          $('<td>').append(
+            $('<button type="button" class="btn btn-primary btn-sm import-bulk-btn">')
+              .attr('data-lrb-pk', item.lrb_pk)
+              .text('{{ "Import"|trans }}')
+          )
+        );
+        tbody.append($row);
+      });
+      tbody.find('.import-bulk-btn').on('click', function() {
+        importBulkData(parseInt($(this).data('lrb-pk'), 10));
+      });
+    }
+
+    function updatePaginationControls() {
+      if (bulkTotalRecords === 0) {
+        $('#bulkPaginationInfo').text('{{ "No records found"|trans }}');
+      } else {
+        var start = (bulkCurrentPage - 1) * bulkPageSize + 1;
+        var end   = Math.min(bulkCurrentPage * bulkPageSize, bulkTotalRecords);
+        $('#bulkPaginationInfo').text('{{ "Showing"|trans }} ' + start + ' {{ "to"|trans }} ' + end +
+          ' {{ "of"|trans }} ' + bulkTotalRecords + ' {{ "entries"|trans }}');
+      }
+      $('#bulkPageIndicator').text('{{ "Page"|trans }} ' + bulkCurrentPage + ' {{ "of"|trans }} ' + bulkTotalPages);
+      $('#bulkPrevBtn').prop('disabled', bulkCurrentPage <= 1);
+      $('#bulkNextBtn').prop('disabled', bulkCurrentPage >= bulkTotalPages);
+    }
+
+    function importBulkData(lrbPk) {
+      var selectedData = bulkDataCache.find(function(item) { return item.lrb_pk == lrbPk; });
+      if (!selectedData) { alert("{{ 'Selected data not found'|trans }}"); return; }
+      $('textarea[name="{{ textParam }}"]').val(selectedData.bulk_reference_text || '');
+      if (selectedData.licenses && selectedData.licenses.length > 0) {
+        licenseQueue = [];
+        selectedData.licenses.forEach(function(license) {
+          licenseQueue.push({
+            licenseId:       parseInt(license.license_id, 10),
+            licenseName:     license.license_shortname,
+            action:          license.is_removing_license ? "Remove" : "Add",
+            reportinfo:      license.license_reportinfo      || '',
+            acknowledgement: license.license_acknowledgement || '',
+            comment:         license.license_comment         || ''
+          });
+        });
+        updateLicenseQueue();
+      }
+      $('#bulkDataModal').modal('hide');
+      setTimeout(checkForDuplicateText, 100);
+    }
+
+    function checkForDuplicateText() {
+      var textContent = $('#textField').val().trim();
+      var currentCpPk = $('input[name="cp_pk"]').val() || 0;
+      if (textContent.length === 0) { $('#duplicateWarning').addClass('d-none'); return; }
+      $.ajax({
+        url: "?mod=admin_custom_text_management&action=check_duplicate",
+        type: "POST", data: { text: textContent, cp_pk: currentCpPk }, dataType: "json",
+        success: function(response) {
+          $('#duplicateWarning').toggleClass('d-none', !response.duplicate);
+        }
+      });
+    }
+
+    function addLicense() {
+      var licenseId = parseInt($('#addLicenseSelect').val(), 10);
+      if (licenseId > 0) {
+        maybeRemoveOldEntry(licenseId);
+        licenseQueue.push({ licenseId: licenseId, licenseName: $('#addLicenseSelect option:selected').text(), action: "Add",
+                            reportinfo: '', acknowledgement: '', comment: '' });
+        updateLicenseQueue();
+        $('#addLicenseSelect').val(null).trigger('change');
+      }
+    }
+
+    function rmLicense() {
+      var licenseId = parseInt($('#removeLicenseSelect').val(), 10);
+      if (licenseId > 0) {
+        maybeRemoveOldEntry(licenseId);
+        licenseQueue.push({ licenseId: licenseId, licenseName: $('#removeLicenseSelect option:selected').text(), action: "Remove",
+                            reportinfo: '', acknowledgement: '', comment: '' });
+        updateLicenseQueue();
+        $('#removeLicenseSelect').val(null).trigger('change');
+      }
+    }
+
+    function maybeRemoveOldEntry(licenseId) {
+      licenseId = parseInt(licenseId, 10);
+      licenseQueue = licenseQueue.filter(function(item) { return parseInt(item.licenseId, 10) !== licenseId; });
+    }
+
+    function removeLicenseFromQueue(licenseId) {
+      licenseId = parseInt(licenseId, 10);
+      licenseQueue = licenseQueue.filter(function(item) { return parseInt(item.licenseId, 10) !== licenseId; });
+      updateLicenseQueue();
+    }
+
+    function serializeQueue() {
+      $('#licenseDataInput').val(JSON.stringify(licenseQueue));
+    }
+
+    function updateLicenseQueue() {
+      var tbody = $('#licenseQueueTableBody');
+      tbody.empty();
+      if (licenseQueue.length === 0) {
+        tbody.append('<tr><td colspan="6" class="text-center text-muted">{{ "No licenses selected"|trans }}</td></tr>');
+      } else {
+        for (var i = 0; i < licenseQueue.length; i++) {
+          (function(idx) {
+            var item = licenseQueue[idx];
+            var badge = item.action === 'Add'
+              ? '<span class="badge badge-add px-2 py-1">{{ "Add"|trans }}</span>'
+              : '<span class="badge badge-rm  px-2 py-1">{{ "Remove"|trans }}</span>';
+            var safeId = 'lic_' + parseInt(item.licenseId, 10);
+            var metaCells = item.action === 'Add'
+              ? '<td class="meta-cell"><textarea class="lq-reportinfo form-control form-control-sm" rows="2"' +
+                  ' data-idx="' + idx + '" id="' + safeId + '_ri" placeholder="{{ "License text"|trans }}">' +
+                  $('<div/>').text(item.reportinfo || '').html() + '</textarea></td>' +
+                '<td class="meta-cell"><textarea class="lq-acknowledgement form-control form-control-sm" rows="2"' +
+                  ' data-idx="' + idx + '" id="' + safeId + '_ack" placeholder="{{ "Acknowledgement"|trans }}">' +
+                  $('<div/>').text(item.acknowledgement || '').html() + '</textarea></td>' +
+                '<td class="meta-cell"><textarea class="lq-comment form-control form-control-sm" rows="2"' +
+                  ' data-idx="' + idx + '" id="' + safeId + '_cmt" placeholder="{{ "Comment"|trans }}">' +
+                  $('<div/>').text(item.comment || '').html() + '</textarea></td>'
+              : '<td class="text-center text-muted">—</td>' +
+                '<td class="text-center text-muted">—</td>' +
+                '<td class="text-center text-muted">—</td>';
+            var row = '<tr class="' + (idx % 2 === 1 ? 'even' : 'odd') + '">' +
+              '<td>' + badge + '</td>' +
+              '<td>' + $('<div/>').text(item.licenseName).html() + '</td>' +
+              metaCells +
+              '<td style="text-align: center;">' +
+                '<button type="button" class="remove-license-btn btn btn-link btn-sm p-0 text-danger"' +
+                  ' data-license-id="' + parseInt(item.licenseId, 10) + '"' +
+                  ' title="{{ "Remove from queue"|trans }}">' +
+                  '<img src="images/icons/remove_16.png" alt="-"/>' +
+                '</button>' +
+              '</td>' +
+            '</tr>';
+            tbody.append(row);
+          })(i);
+        }
+      }
+      serializeQueue();
+    }
+
+    $(document).on('input', '.lq-reportinfo, .lq-acknowledgement, .lq-comment', function() {
+      var idx = parseInt($(this).data('idx'), 10);
+      if ($(this).hasClass('lq-reportinfo'))      licenseQueue[idx].reportinfo      = $(this).val();
+      if ($(this).hasClass('lq-acknowledgement'))  licenseQueue[idx].acknowledgement = $(this).val();
+      if ($(this).hasClass('lq-comment'))          licenseQueue[idx].comment         = $(this).val();
+      serializeQueue();
+    });
+
+    $(document).on('click', '.remove-license-btn', function() {
+      removeLicenseFromQueue($(this).data('license-id'));
+    });
+  </script>
+{% endblock %}

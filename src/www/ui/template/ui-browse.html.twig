@@ -40,10 +40,11 @@
         <div style="text-align:center;" class="btn"><strong><u>{{ 'Folder Navigation'|trans }}</u></strong></div>
         {{ folderNav }}
       </td>
-      <td valign="top" style="background: #efefef; width:1px; font-family:monospace; word-break:break-all;" id="nav-shower" hidden>
+      {# <td valign="top" style="background: #efefef; width:1px; font-family:monospace; word-break:break-all;" id="nav-shower" hidden>
           &raquo;&nbsp;{{ 'Folder Navigation'|trans|replace({' ':'&nbsp;'}) }}&nbsp;&raquo;
-      </td>
+      </td> #}
       <td valign="top">
+        <span class="btn btn-outline-info" id="nav-shower" hidden style="float:left; transition: opacity 0.5s ease-in-out, transform 0.5s ease-in-out;">></span>
         <div style="text-align:center;font-size:large;"><strong><u>{{ 'Uploads'|trans }} {{ 'in'|trans }} <span id="current-folder">{{ folderName }}</span></u></strong></div>
         <form name="uploadMultiSelect">
         <table class="semibordered" id="browsetbl" width="100%" cellpadding="0">
@@ -53,7 +54,7 @@
            <th></th>
            <th>
              <select id="statusSelector" class="form-control-sm" onchange="filterStatus();">
-               <option value="0" selected> </option>
+               <option value="0" selected>-- Select --</option>
             {% for key,disp in statusOptions %}
               <option value="{{ key }}">{{ disp }}</option>
             {% endfor %}
@@ -65,7 +66,7 @@
            <th>
              <select id="assigneeSelector" style="max-width:250px;" class="form-control-sm" onchange="filterAssignee();">
              {% for key,disp in assigneeOptions %}
-               <option value="{{ key }}" {%if key == 0 %} selected{% endif %}>{{ disp }}</option>
+               <option value="{{ key }}" {%if key == 0 %} selected{% endif %}>{% if key == 0 %}-- Select --{% else %}{{ disp }}{% endif %}</option>
              {% endfor %}
              </select>
            </th>
@@ -82,7 +83,7 @@
           <input type="checkbox" name="folder" checked="checked" id="browse-upload-all" value="{{ folderId }}" data-toggle="toggle" data-on="Whole folder" data-off="Marked uploads" data-onstyle="outline-success" data-offstyle="outline-success">
           {{ 'to run'|trans }}:
           {% for muAgent,muDesc in multiUploadAgents %}
-            <input type="submit" value="{{ muDesc }}" name="{{ muAgent }}" class="multi-upload-agent btn btn-default"/>
+            <input type="submit" value="{{ muDesc }}" name="{{ muAgent }}" class="multi-upload-agent btn btn-light"/>
           {% endfor %}
         {% endif %}
         </form>

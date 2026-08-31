@@ -46,10 +46,19 @@ class UserController extends RestController
    */
   public function getUsers($request, $response, $args)
   {
+    $this->throwNotAdminException();
     $apiVersion = ApiVersion::getVersion($request);
     $id = null;
     if (isset($args['pathParam'])) {
-      $id = $apiVersion == ApiVersion::V2 ? intval($this->restHelper->getUserDao()->getUserByName($args['pathParam'])['user_pk']) : intval($args['pathParam']);
+      if ($apiVersion == ApiVersion::V2) {
+        $user = $this->restHelper->getUserDao()->getUserByName($args['pathParam']);
+        if ($user === null) {
+          throw new HttpNotFoundException("UserId doesn't exist");
+        }
+        $id = intval($user['user_pk']);
+      } else {
+        $id = intval($args['pathParam']);
+      }
       if (! $this->dbHelper->doesIdExist("users", "user_pk", $id)) {
         throw new HttpNotFoundException("UserId doesn't exist");
       }
@@ -77,8 +86,15 @@ class UserController extends RestController
    */
   public function addUser($request, $response, $args)
   {
+    $this->throwNotAdminException();
     $apiVersion = ApiVersion::getVersion($request);
     $userDetails = $this->getParsedBody($request);
+    if ($userDetails === null || !is_array($userDetails)) {
+      throw new HttpBadRequestException("Request body is empty or malformed.");
+    }
+    if (empty($userDetails['name'])) {
+      throw new HttpBadRequestException("Username must be specified.");
+    }
     $userHelper = new UserHelper();
     // creating symphony request
     $symfonyRequest = new \Symfony\Component\HttpFoundation\Request();
@@ -140,8 +156,17 @@ class UserController extends RestController
    */
   public function deleteUser($request, $response, $args)
   {
+    $this->throwNotAdminException();
     $apiVersion = ApiVersion::getVersion($request);
-    $id = $apiVersion == ApiVersion::V2 ? intval($this->restHelper->getUserDao()->getUserByName($args['pathParam'])['user_pk']) : intval($args['pathParam']);
+    if ($apiVersion == ApiVersion::V2) {
+      $user = $this->restHelper->getUserDao()->getUserByName($args['pathParam']);
+      if ($user === null) {
+        throw new HttpNotFoundException("UserId doesn't exist");
+      }
+      $id = intval($user['user_pk']);
+    } else {
+      $id = intval($args['pathParam']);
+    }
     if (!$this->dbHelper->doesIdExist("users","user_pk", $id)) {
       throw new HttpNotFoundException("UserId doesn't exist");
     }
@@ -184,7 +209,18 @@ class UserController extends RestController
   public function updateUser($request, $response, $args)
   {
     $apiVersion = ApiVersion::getVersion($request);
-    $id = $apiVersion == ApiVersion::V2 ? intval($this->restHelper->getUserDao()->getUserByName($args['pathParam'])['user_pk']) : intval($args['pathParam']);
+    if ($apiVersion == ApiVersion::V2) {
+      $user = $this->restHelper->getUserDao()->getUserByName($args['pathParam']);
+      if ($user === null) {
+        throw new HttpNotFoundException("UserId doesn't exist");
+      }
+      $id = intval($user['user_pk']);
+    } else {
+      $id = intval($args['pathParam']);
+    }
+    if ($id !== intval($this->restHelper->getUserId())) {
+      $this->throwNotAdminException();
+    }
     if (!$this->dbHelper->doesIdExist("users","user_pk", $id)) {
       throw new HttpNotFoundException("UserId doesn't exist");
     }

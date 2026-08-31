@@ -1,0 +1,30 @@
+{# SPDX-FileCopyrightText: © 2015 Siemens AG
+
+   SPDX-License-Identifier: FSFAP
+#}
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: {{ documentName }}
+Disclaimer: <text> This file is offered as-is, without any warranty. </text>
+{% if mainLicense is not empty -%}
+License: {{ mainLicense }}
+{% endif -%}
+Comment: {% if licenseComments %}
+ {{ licenseComments|replace({'licenseInfoInFile determined by Scanners:': 'License information in files determined by scanners:'}) }}
+ .
+{% endif %} created on {{ 'now'|date('Y-m-d\\TH:i:s\\Z') }} with FOSSology
+{# File Paragraphes: #}
+{{ packageNodes }}
+{# Stand-alone License Paragraphes: #}
+{% for licenseData in licenseList -%}
+{%- if licenseData.licenseObj.spdxId starts with 'LicenseRef-' or licenseData.licenseObj.shortName starts with 'LicenseRef-' -%}
+{%- set licId = licenseData.licenseObj.spdxId -%}
+{%- if licenseData.licenseObj.shortName starts with 'LicenseRef-' -%}
+{%- set licId = licenseData.licenseObj.shortName -%}
+{%- endif -%}
+
+License: {{ licId }}
+ {{ licenseData.licenseObj.text|replace({'\f':''})|replace({'\r\n':'\n'})
+                                                   |replace({'\n\n':'\n.\n'})
+                                                   |replace({'\n\n':'\n.\n'})
+                                                   |replace({'\n':'\n '}) }}
+{% endif %}{% endfor %}

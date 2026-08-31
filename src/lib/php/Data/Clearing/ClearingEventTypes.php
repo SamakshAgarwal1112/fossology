@@ -16,6 +16,8 @@ class ClearingEventTypes extends Types
   const BULK = 2;
   const AGENT = 3;
   const IMPORT = 4;
+  const AUTO = 5;
+  const KOTOBA = 6;
 
   public function __construct()
   {
@@ -25,7 +27,9 @@ class ClearingEventTypes extends Types
         self::USER => "User decision",
         self::BULK => "Bulk",
         self::AGENT => "User confirmed agent finding",
-        self::IMPORT => "Imported decision"
+        self::IMPORT => "Imported decision",
+        self::AUTO => "Auto Concluded",
+        self::KOTOBA => "Kotoba"
     );
   }
 }

@@ -117,6 +117,10 @@
 /* fo library includes */
 #include <fossconfig.h>
 
+/** Maximum number of jobs to fetch from the database in a single poll cycle
+ *  when no host configuration has been loaded yet (startup fallback).
+ *  At runtime the actual limit is the sum of max-agent slots across all
+ *  configured hosts; see database_update_event() in database.c. */
 #define CHECKOUT_SIZE 100
 
 #define AGENT_BINARY "%s/%s/%s/agent/%s"  ///< Format to get agent binary
@@ -181,6 +185,9 @@ typedef struct
     gchar*   email_command;   ///< The command that will sends emails, usually mailx
     gboolean default_header;  ///< Is the header the default header
     gboolean default_footer;  ///< Is the footer the default footer
+
+    /* scheduler self-version tracking */
+    gchar* scheduler_version; ///< The version string read from VERSION file at last (re)load
 
     /* regular expressions */
     GRegex* parse_agent_msg;     ///< Parses messages coming from the agents
@@ -274,6 +281,7 @@ gint int_compare(gconstpointer a, gconstpointer b, gpointer user_data);
 void scheduler_config_event(scheduler_t* scheduler, void*);
 void scheduler_close_event(scheduler_t* scheduler, void*);
 void scheduler_test_agents(scheduler_t* scheduler, void*);
+void scheduler_version_refresh(scheduler_t* scheduler, void* unused);
 
 void scheduler_clear_config(scheduler_t* scheduler);
 void scheduler_agent_config(scheduler_t* scheduler);

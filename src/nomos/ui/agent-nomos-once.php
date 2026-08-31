@@ -50,7 +50,7 @@ class agent_nomos_once extends FO_Plugin
   {
     global $SYSCONFDIR;
 
-    exec("$SYSCONFDIR/mods-enabled/nomos/agent/nomos -S $FilePath", $out, $rtn);
+    exec("$SYSCONFDIR/mods-enabled/nomos/agent/nomos -S " . escapeshellarg($FilePath), $out, $rtn);
     $licensesFromAgent = explode('contains license(s)', $out[0]);
     $licenses_and_Highlight = end($licensesFromAgent);
     $licenses = explode('Highlighting Info at', $licenses_and_Highlight);
@@ -135,7 +135,7 @@ class agent_nomos_once extends FO_Plugin
          * which removes the POST data.
          */
         $tooltipText = _(
-          "FATAL: your file did not get passed throught.  Make sure this page wasn't a result of a web server redirect, or that it didn't exceed your php POST limit.");
+          "FATAL: your file did not get passed through.  Make sure this page wasn't a result of a web server redirect, or that it didn't exceed your php POST limit.");
         echo $tooltipText;
       }
     }

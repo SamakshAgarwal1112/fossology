@@ -42,13 +42,17 @@ class ChangeLicenseBulk extends DefaultPlugin
    */
   public function handle(Request $request)
   {
-    $uploadTreeId = intval($request->get('uploadTreeId'));
-    if ($uploadTreeId <= 0) {
+    $uploadTreeId = $request->get('uploadTreeId');
+    $uploadTreeId = strpos($uploadTreeId, ',') !== false
+      ? explode(',', $uploadTreeId)
+      : intval($uploadTreeId);
+
+    if (empty($uploadTreeId)) {
       return new JsonResponse(array("error" => 'bad request'), JsonResponse::HTTP_BAD_REQUEST);
     }
 
     try {
-      $jobQueueId = $this->getJobQueueId($uploadTreeId, $request);
+      $jobQueueId = $this->scheduleBulkScan($uploadTreeId, $request);
     } catch (Exception $ex) {
       $errorMsg = $ex->getMessage();
       return new JsonResponse(array("error" => $errorMsg), JsonResponse::HTTP_INTERNAL_SERVER_ERROR);
@@ -58,6 +62,24 @@ class ChangeLicenseBulk extends DefaultPlugin
     return new JsonResponse(array("jqid" => $jobQueueId));
   }
 
+  /**
+   *
+   * @param int $uploadTreeId
+   * @param Request $request
+   * @return int $jobQueueId
+   */
+  private function scheduleBulkScan($uploadTreeId, Request $request)
+  {
+    if (is_array($uploadTreeId)) {
+      $jqId = array();
+      foreach ($uploadTreeId as $uploadTreePk) {
+        $jqId[] = $this->getJobQueueId($uploadTreePk, $request);
+      }
+      return $jqId;
+    } else {
+      return $this->getJobQueueId($uploadTreeId, $request);
+    }
+  }
   /**
    *
    * @param int $uploadTreeId
@@ -112,12 +134,20 @@ class ChangeLicenseBulk extends DefaultPlugin
     if ($bulkId <= 0) {
       throw new Exception('cannot insert bulk reference');
     }
+
+    // Handle adding text phrase to custom_phrase table if checkbox is checked
+    $addToCustomPhrase = intval($request->get('addToCustomPhrase'));
+    if ($addToCustomPhrase == 1) {
+      $this->importBulkDataToCustomPhrase($bulkId, $userId, $groupId);
+    }
     $upload = $this->uploadDao->getUpload($uploadId);
     $uploadName = $upload->getFilename();
     $job_pk = JobAddJob($userId, $groupId, $uploadName, $uploadId);
     /** @var DeciderJobAgentPlugin $deciderPlugin */
     $deciderPlugin = plugin_find("agent_deciderjob");
+
     $dependecies = array(array('name' => 'agent_monk_bulk', 'args' => $bulkId));
+
     $conflictStrategyId = intval($request->get('forceDecision'));
     $errorMsg = '';
     $jqId = $deciderPlugin->AgentAdd($job_pk, $uploadId, $errorMsg, $dependecies, $conflictStrategyId);
@@ -126,6 +156,111 @@ class ChangeLicenseBulk extends DefaultPlugin
       throw new Exception(str_replace('<br>', "\n", $errorMsg));
     }
     return $jqId;
+  }
+
+  /**
+   * Import bulk data from license_ref_bulk to custom_phrase table
+   * This reuses the data that was just inserted into license_ref_bulk
+   *
+   * @param int $bulkId The lrb_pk from license_ref_bulk table
+   * @param int $userId User ID
+   * @param int $groupId Group ID
+   * @return void
+   */
+  private function importBulkDataToCustomPhrase($bulkId, $userId, $groupId)
+  {
+    // Fetch the bulk reference text from license_ref_bulk
+    $bulkDataSql = "SELECT rf_text FROM license_ref_bulk WHERE lrb_pk = $1";
+    $this->dbManager->prepare($bulkStmt = __METHOD__ . ".getBulkData", $bulkDataSql);
+    $bulkResult = $this->dbManager->execute($bulkStmt, array($bulkId));
+    $bulkRow = $this->dbManager->fetchArray($bulkResult);
+    $this->dbManager->freeResult($bulkResult);
+
+    if ($bulkRow === false) {
+      error_log("Failed to fetch bulk data for lrb_pk: $bulkId");
+      return;
+    }
+
+    $refText = $bulkRow['rf_text'];
+    $textMd5 = md5($refText);
+
+    $licensesSql = "SELECT rf_fk, COALESCE(removing, false) as removing,
+                           comment, reportinfo, acknowledgement
+                    FROM license_set_bulk WHERE lrb_fk = $1";
+    $this->dbManager->prepare($licenseStmt = __METHOD__ . ".getLicenses", $licensesSql);
+    $licensesResult = $this->dbManager->execute($licenseStmt, array($bulkId));
+
+    $licenses = array();
+    while ($licenseRow = $this->dbManager->fetchArray($licensesResult)) {
+      $licenses[] = array(
+        'rf_fk'           => intval($licenseRow['rf_fk']),
+        'removing'        => $licenseRow['removing'] === 't' || $licenseRow['removing'] === true,
+        'comment'         => $licenseRow['comment'] ?: null,
+        'reportinfo'      => $licenseRow['reportinfo'] ?: null,
+        'acknowledgement' => $licenseRow['acknowledgement'] ?: null
+      );
+    }
+    $this->dbManager->freeResult($licensesResult);
+
+    // ON CONFLICT DO NOTHING avoids a check-then-insert race between two
+    // concurrent bulk decisions on the same text.
+    $this->dbManager->begin();
+    try {
+      $insertSql = "INSERT INTO custom_phrase
+                    (text, text_md5, acknowledgement, comments, user_fk, group_fk, is_active, created_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+                    ON CONFLICT (text_md5) DO NOTHING
+                    RETURNING cp_pk";
+      $params = array($refText, $textMd5, '', '', $userId, $groupId, 'true');
+      $this->dbManager->prepare($insertStmt = __METHOD__ . ".insertPhrase", $insertSql);
+      $result = $this->dbManager->execute($insertStmt, $params);
+      $row = $this->dbManager->fetchArray($result);
+      $this->dbManager->freeResult($result);
+
+      $isNewPhrase = ($row !== false);
+      if ($isNewPhrase) {
+        $cpPk = $row['cp_pk'];
+      } else {
+        $checkSql = "SELECT cp_pk FROM custom_phrase WHERE text_md5 = $1";
+        $this->dbManager->prepare($checkStmt = __METHOD__ . ".findExisting", $checkSql);
+        $checkResult = $this->dbManager->execute($checkStmt, array($textMd5));
+        $existingPhrase = $this->dbManager->fetchArray($checkResult);
+        $this->dbManager->freeResult($checkResult);
+        if ($existingPhrase === false) {
+          throw new Exception("custom_phrase insert conflicted but no row found for text_md5 $textMd5");
+        }
+        $cpPk = $existingPhrase['cp_pk'];
+      }
+
+      if (!empty($licenses)) {
+        $mapSql = "INSERT INTO custom_phrase_license_map
+                   (cp_fk, rf_fk, removing, comment, reportinfo, acknowledgement)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT (cp_fk, rf_fk) DO NOTHING";
+        $this->dbManager->prepare($mapStmt = __METHOD__ . ".insertLicenseMap", $mapSql);
+
+        foreach ($licenses as $license) {
+          $mapResult = $this->dbManager->execute($mapStmt, array(
+            $cpPk,
+            $license['rf_fk'],
+            $license['removing'] ? 'true' : 'false',
+            $license['comment'],
+            $license['reportinfo'],
+            $license['acknowledgement']
+          ));
+          $this->dbManager->freeResult($mapResult);
+        }
+      }
+
+      $this->dbManager->commit();
+      error_log(($isNewPhrase ? "Custom phrase imported" : "Licenses merged into existing custom phrase")
+        . " from bulk data. cp_pk: $cpPk, lrb_pk: $bulkId");
+    } catch (Exception $e) {
+      $this->dbManager->rollback();
+      error_log("Error importing bulk data to custom phrase: " . $e->getMessage());
+      // Don't throw exception to avoid breaking the bulk scan
+      // Just log the error and continue
+    }
   }
 }
 

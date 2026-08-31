@@ -7,7 +7,7 @@
 
 /**
  * @file
- * @brief Setup the dependency injection container for Symfony from services.xml
+ * @brief Setup the dependency injection container for Symfony from services.xml.in
  */
 use Monolog\Handler\BrowserConsoleHandler;
 use Monolog\Handler\ErrorLogHandler;
@@ -70,7 +70,9 @@ $GLOBALS['container'] = $container;
 $logger = $container->get('logger');
 $logger->pushHandler(
   new ErrorLogHandler(ErrorLogHandler::OPERATING_SYSTEM, Logger::INFO));
-$logger->pushHandler(new BrowserConsoleHandler(Logger::DEBUG));
+if (!$restCall) {
+  $logger->pushHandler(new BrowserConsoleHandler(Logger::DEBUG));
+}
 
 $timeZone = $container->getParameter('time.zone');
 if (! empty($timeZone)) {
